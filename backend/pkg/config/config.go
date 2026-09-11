@@ -2,22 +2,24 @@ package config
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
 const (
-	RESOURCE_NODE          = "node"
-	RESOURCE_ACCOUNT       = "account"
-	RESOURCE_ASSET         = "asset"
-	RESOURCE_COMMAND       = "command"
-	RESOURCE_GATEWAY       = "gateway"
-	RESOURCE_AUTHORIZATION = "authorization"
+	RESOURCE_NODE            = "node"
+	RESOURCE_ACCOUNT         = "account"
+	RESOURCE_ASSET           = "asset"
+	RESOURCE_COMMAND         = "command"
+	RESOURCE_GATEWAY         = "gateway"
+	RESOURCE_AUTHORIZATION   = "authorization"
+	RESOURCE_PAM_APPLICATION = "pam_application"
 )
 
 var (
-	PermResource = []string{RESOURCE_NODE, RESOURCE_ACCOUNT, RESOURCE_ASSET, RESOURCE_COMMAND, RESOURCE_GATEWAY}
+	PermResource = []string{RESOURCE_NODE, RESOURCE_ACCOUNT, RESOURCE_ASSET, RESOURCE_COMMAND, RESOURCE_GATEWAY, RESOURCE_PAM_APPLICATION}
 
 	Cfg = &ConfigYaml{
 		Mode: "debug",
@@ -41,6 +43,17 @@ var (
 )
 
 func init() {
+	// An explicit file also allows tools and isolated tests to avoid loading a deployment config.
+	if path := os.Getenv("ONETERM_CONFIG_FILE"); path != "" {
+		viper.SetConfigFile(path)
+		if err := viper.ReadInConfig(); err != nil {
+			panic(fmt.Errorf("load explicit config: %w", err))
+		}
+		if err := viper.Unmarshal(Cfg); err != nil {
+			panic(fmt.Errorf("parse explicit config: %w", err))
+		}
+		return
+	}
 	path := pflag.StringP("config", "c", "config.yaml", "config path")
 	pflag.Parse()
 
@@ -61,8 +74,9 @@ func init() {
 }
 
 type HttpConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host           string   `yaml:"host"`
+	Port           int      `yaml:"port"`
+	TrustedProxies []string `yaml:"trustedProxies" mapstructure:"trustedProxies"`
 }
 
 type RedisConfig struct {

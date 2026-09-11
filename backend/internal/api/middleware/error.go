@@ -42,16 +42,20 @@ func Error2RespMiddleware() gin.HandlerFunc {
 		obj := make(map[string]any)
 		json.Unmarshal(wb.body.Bytes(), &obj)
 		if len(ctx.Errors) > 0 {
+			e := ctx.Errors.Last().Err
+			ae, apiError := e.(*errors.ApiError)
 			if v, ok := obj["code"]; !ok || v == 0 {
-				obj["code"] = ctx.Writer.Status()
+				if apiError {
+					obj["code"] = ae.Code
+				} else {
+					obj["code"] = ctx.Writer.Status()
+				}
 			}
 
 			if v, ok := obj["message"]; !ok || v == "" {
-				e := ctx.Errors.Last().Err
 				obj["message"] = e.Error()
 
-				ae, ok := e.(*errors.ApiError)
-				if ok {
+				if apiError {
 					lang := ctx.PostForm("lang")
 					accept := ctx.GetHeader("Accept-Language")
 					localizer := i18n.NewLocalizer(myi18n.Bundle, lang, accept)

@@ -30,6 +30,7 @@ func GetRoleResources(ctx context.Context, rid int, resourceTypeId string) (res 
 	data := &ResourceResult{}
 	url := fmt.Sprintf("%s/acl/roles/%d/resources", config.Cfg.Auth.Acl.Url, rid)
 	resp, err := remote.RC.R().
+		SetContext(remote.CopyContext(ctx)).
 		SetHeader("App-Access-Token", token).
 		SetQueryParams(map[string]string{
 			"app_id":           config.Cfg.Auth.Acl.AppId,
@@ -68,6 +69,7 @@ func HasPermission(ctx context.Context, rid int, resourceTypeName string, resour
 	data := make(map[string]any)
 	url := fmt.Sprintf("%s/acl/roles/has_perm", config.Cfg.Auth.Acl.Url)
 	resp, err := remote.RC.R().
+		SetContext(remote.CopyContext(ctx)).
 		SetHeader("App-Access-Token", token).
 		SetQueryParams(map[string]string{
 			"rid":                cast.ToString(rid),

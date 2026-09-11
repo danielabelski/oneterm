@@ -372,3 +372,65 @@ other = "内核"
 
 [TagModule]
 other = "模块"
+[MsgMFARequired]
+other = "请重新完成 MFA 验证后执行此操作"
+
+[MsgCredentialInput]
+other = "替换已保存凭据或切换认证类型时，请完整填写有效凭据"
+
+[MsgPAMIdentity]
+other = "应用请求的身份验证未通过"
+
+[MsgPAMDenied]
+other = "没有获取此凭据的权限"
+
+[MsgPAMConflict]
+other = "资源名称或身份已被注册，请选择已有记录或检查归属"
+
+[MsgPAMReplay]
+other = "请求凭证已过期或已被使用，请重新签名后重试"
+
+[MsgPAMRevision]
+other = "记录已被修改，请刷新后重新保存"
+
+[MsgPAMInput]
+other = "请检查应用身份、凭据范围和访问设置"
+
+[MsgPAMUnavailable]
+other = "凭据访问暂时不可用，请稍后重试"
+
+[MsgPAMTemplateDenied]
+other = "当前用户无权发起此审批流程，请联系管理员检查 ITSM 模板的可见范围和提交节点处理人"
+
+[MsgPAMBindingChanged]
+other = "目标连接配置已变更，请确认纳管账号绑定后再连接"
+
+[MsgPAMBindingUnavailable]
+other = "纳管账号或其绑定当前不可用"
+
+[MsgPAMApprovalRequired]
+other = "此操作需要已通过的访问申请"
+
+[MsgPAMRequestState]
+other = "申请状态已变化，请刷新后重试"
+
+[MsgPAMScopeChanged]
+other = "目标、凭据或访问策略已变化，请重新提交申请"
+
+[MsgPAMProviderUnavailable]
+other = "当前操作或审批服务尚不可用"
+
+[MsgPAMSessionEnded]
+other = "访问授权已失效，连接已关闭"
+
+[MsgPAMSessionCapacity]
+other = "该账号已达到并发会话上限"
+
+[MsgPAMSessionConflict]
+other = "该连接标识已使用，请重新发起连接"
+
+[MsgPAMCredentialShared]
+other = "该账号还关联其他资产，请使用独立账号管理单个资产的密码"
+
+[MsgPAMExecutionState]
+other = "密码任务状态不允许此操作，请先核对改密记录"

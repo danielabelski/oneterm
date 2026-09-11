@@ -7,8 +7,6 @@ import (
 	"github.com/veops/oneterm/internal/model"
 	"github.com/veops/oneterm/internal/repository"
 	"github.com/veops/oneterm/internal/tunneling"
-	"github.com/veops/oneterm/pkg/utils"
-	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
 
@@ -23,37 +21,6 @@ func NewGatewayService() *GatewayService {
 	return &GatewayService{
 		repo:          repository.NewGatewayRepository(),
 		tunnelManager: tunneling.NewTunnelManager(),
-	}
-}
-
-// ValidatePublicKey validates the given public key
-func (s *GatewayService) ValidatePublicKey(gateway *model.Gateway) error {
-	if gateway.AccountType != model.AUTHMETHOD_PUBLICKEY {
-		return nil
-	}
-
-	var err error
-	if gateway.Phrase == "" {
-		_, err = ssh.ParsePrivateKey([]byte(gateway.Pk))
-	} else {
-		_, err = ssh.ParsePrivateKeyWithPassphrase([]byte(gateway.Pk), []byte(gateway.Phrase))
-	}
-	return err
-}
-
-// EncryptSensitiveData encrypts sensitive gateway data
-func (s *GatewayService) EncryptSensitiveData(gateway *model.Gateway) {
-	gateway.Password = utils.EncryptAES(gateway.Password)
-	gateway.Pk = utils.EncryptAES(gateway.Pk)
-	gateway.Phrase = utils.EncryptAES(gateway.Phrase)
-}
-
-// DecryptSensitiveData decrypts sensitive gateway data
-func (s *GatewayService) DecryptSensitiveData(gateways []*model.Gateway) {
-	for _, g := range gateways {
-		g.Password = utils.DecryptAES(g.Password)
-		g.Pk = utils.DecryptAES(g.Pk)
-		g.Phrase = utils.DecryptAES(g.Phrase)
 	}
 }
 

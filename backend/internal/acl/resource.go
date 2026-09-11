@@ -310,6 +310,7 @@ func DeleteResource(ctx context.Context, uid int, resourceId int) (err error) {
 
 	url := fmt.Sprintf("%v/acl/resources/%v", config.Cfg.Auth.Acl.Url, resourceId)
 	resp, err := remote.RC.R().
+		SetContext(remote.CopyContext(ctx)).
 		SetHeaders(map[string]string{
 			"App-Access-Token": token,
 			"X-User-Id":        cast.ToString(uid),
@@ -345,6 +346,7 @@ func GetResourcePermissions(ctx context.Context, resourceId int) (res map[string
 	res = make(map[string]*ResourcePermissionsRespItem)
 	url := fmt.Sprintf("%v/acl/resources/%v/permissions", config.Cfg.Auth.Acl.Url, resourceId) //TODO config
 	resp, err := remote.RC.R().
+		SetContext(remote.CopyContext(ctx)).
 		SetHeader("App-Access-Token", token).
 		SetResult(&res).
 		Get(url)

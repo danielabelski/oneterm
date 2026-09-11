@@ -2,15 +2,11 @@ package service
 
 import (
 	"context"
-	"errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/veops/oneterm/internal/acl"
 	"github.com/veops/oneterm/internal/model"
 	"github.com/veops/oneterm/internal/repository"
-	"github.com/veops/oneterm/pkg/config"
-	"github.com/veops/oneterm/pkg/utils"
-	"golang.org/x/crypto/ssh"
 	"gorm.io/gorm"
 )
 
@@ -23,37 +19,6 @@ type AccountService struct {
 func NewAccountService() *AccountService {
 	return &AccountService{
 		repo: repository.NewAccountRepository(),
-	}
-}
-
-// ValidatePublicKey validates the given public key
-func (s *AccountService) ValidatePublicKey(account *model.Account) error {
-	if account.AccountType != model.AUTHMETHOD_PUBLICKEY {
-		return nil
-	}
-
-	var err error
-	if account.Phrase == "" {
-		_, err = ssh.ParsePrivateKey([]byte(account.Pk))
-	} else {
-		_, err = ssh.ParsePrivateKeyWithPassphrase([]byte(account.Pk), []byte(account.Phrase))
-	}
-	return err
-}
-
-// EncryptSensitiveData encrypts sensitive account data
-func (s *AccountService) EncryptSensitiveData(account *model.Account) {
-	account.Password = utils.EncryptAES(account.Password)
-	account.Pk = utils.EncryptAES(account.Pk)
-	account.Phrase = utils.EncryptAES(account.Phrase)
-}
-
-// DecryptSensitiveData decrypts sensitive account data
-func (s *AccountService) DecryptSensitiveData(accounts []*model.Account) {
-	for _, a := range accounts {
-		a.Password = utils.DecryptAES(a.Password)
-		a.Pk = utils.DecryptAES(a.Pk)
-		a.Phrase = utils.DecryptAES(a.Phrase)
 	}
 }
 
@@ -109,37 +74,16 @@ func (s *AccountService) BuildQueryWithAuthorization(ctx *gin.Context) (*gorm.DB
 
 // GetAccountCredentials gets account credentials with ACL permission check
 func (s *AccountService) GetAccountCredentials(ctx *gin.Context, accountId int) (*model.Account, error) {
-	// Get current user info
-	currentUser, err := acl.GetSessionFromCtx(ctx)
+	credential, err := RetrieveHumanCredential(ctx, model.PAMCredentialTarget{Kind: model.PAMOwnerAccount, ID: accountId})
 	if err != nil {
 		return nil, err
 	}
-
-	// First get the account to check if it exists
+	// Keep the legacy response shape while all disclosure checks and audit use the same broker.
 	var account model.Account
 	baseRepo := repository.NewBaseRepository()
 	if err := baseRepo.GetById(ctx, accountId, &account); err != nil {
-		return nil, errors.New("account not found")
-	}
-
-	if acl.IsAdmin(currentUser) {
-		// Decrypt sensitive data before returning
-		s.DecryptSensitiveData([]*model.Account{&account})
-		return &account, nil
-	}
-
-	// Check if user has read permission for this account resource
-	hasPermission, err := acl.HasPermission(ctx, currentUser.GetRid(), config.RESOURCE_ACCOUNT, account.ResourceId, acl.READ)
-	if err != nil {
 		return nil, err
 	}
-
-	if !hasPermission {
-		return nil, errors.New("permission denied")
-	}
-
-	// Decrypt sensitive data before returning
-	s.DecryptSensitiveData([]*model.Account{&account})
-
+	account.SetCredentialValues(credential.Password, credential.PK, credential.Phrase)
 	return &account, nil
 }

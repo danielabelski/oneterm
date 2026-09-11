@@ -1,14 +1,13 @@
 package controller
 
 import (
-	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
 
-	"github.com/veops/oneterm/internal/acl"
 	"github.com/veops/oneterm/internal/model"
 	"github.com/veops/oneterm/internal/service"
 	"github.com/veops/oneterm/pkg/config"
@@ -19,16 +18,23 @@ var (
 	accountService = service.NewAccountService()
 
 	accountPreHooks = []preHook[*model.Account]{
-		// Validate public key
 		func(ctx *gin.Context, data *model.Account) {
-			if err := accountService.ValidatePublicKey(data); err != nil {
-				ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrWrongPvk, Data: nil})
+			var fields map[string]any
+			if err := ctx.ShouldBindBodyWithJSON(&fields); err != nil {
+				abortPAM(ctx, service.ErrPAMInput)
 				return
 			}
-		},
-		// Encrypt sensitive data
-		func(ctx *gin.Context, data *model.Account) {
-			accountService.EncryptSensitiveData(data)
+			for field := range fields {
+				switch strings.ToLower(field) {
+				case "managed", "authority_kind", "authority_ref", "authority_asset_id", "native_qualifier", "platform", "enabled", "revision":
+					abortPAM(ctx, service.ErrPAMInput)
+					return
+				}
+			}
+			if err := service.ValidateStoredCredential(data); err != nil {
+				ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrCredentialInput})
+				return
+			}
 		},
 	}
 
@@ -83,7 +89,7 @@ func (c *Controller) DeleteAccount(ctx *gin.Context) {
 //	@Success	200		{object}	HttpResponse
 //	@Router		/account/:id [put]
 func (c *Controller) UpdateAccount(ctx *gin.Context) {
-	doUpdate(ctx, true, &model.Account{}, config.RESOURCE_ACCOUNT, accountPreHooks...)
+	doUpdate(ctx, true, &model.Account{}, config.RESOURCE_ACCOUNT)
 }
 
 // GetAccounts godoc
@@ -116,6 +122,7 @@ func (c *Controller) GetAccounts(ctx *gin.Context) {
 	} else {
 		// Exclude sensitive fields but include other metadata
 		db = db.Select("id", "name", "account", "account_type", "resource_id",
+			"managed", "platform", "enabled", "revision",
 			"creator_id", "updater_id", "created_at", "updated_at", "deleted_at")
 	}
 
@@ -131,6 +138,8 @@ func (c *Controller) GetAccounts(ctx *gin.Context) {
 //	@Success	200			{object}	HttpResponse{data=model.Account}
 //	@Router		/account/{id}/credentials [post]
 func (c *Controller) GetAccountCredentials(ctx *gin.Context) {
+	ctx.Header("Cache-Control", "no-store")
+	ctx.Header("Pragma", "no-cache")
 	// Get account ID from path parameter
 	accountId := cast.ToInt(ctx.Param("id"))
 	if accountId == 0 {
@@ -141,36 +150,9 @@ func (c *Controller) GetAccountCredentials(ctx *gin.Context) {
 		return
 	}
 
-	// Get MFA token from header
-	mfaToken := ctx.GetHeader("X-Mfa-Token")
-	if mfaToken == "" {
-		ctx.AbortWithError(http.StatusUnauthorized, errors.New("MFA token required in X-MFA-Token header"))
-		return
-	}
-
-	// Verify MFA token using ACL service
-	if !acl.VerifyMFAToken(mfaToken) {
-		ctx.AbortWithError(http.StatusUnauthorized, errors.New("MFA token verification failed"))
-		return
-	}
-
 	account, err := accountService.GetAccountCredentials(ctx, accountId)
 	if err != nil {
-		if err.Error() == "account not found" {
-			ctx.AbortWithError(http.StatusNotFound, &myErrors.ApiError{
-				Data: map[string]any{"err": "Account not found"},
-			})
-		} else if err.Error() == "permission denied" {
-			ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{
-				Code: myErrors.ErrNoPerm,
-				Data: map[string]any{"perm": acl.READ},
-			})
-		} else {
-			ctx.AbortWithError(http.StatusInternalServerError, &myErrors.ApiError{
-				Code: myErrors.ErrInternal,
-				Data: map[string]any{"err": err.Error()},
-			})
-		}
+		abortPAM(ctx, err)
 		return
 	}
 
@@ -187,39 +169,7 @@ func (c *Controller) GetAccountCredentials(ctx *gin.Context) {
 //	@Success	200		{object}	HttpResponse{data=model.Account}
 //	@Router		/account/{id}/credentials2 [get]
 func (c *Controller) GetAccountCredentials2(ctx *gin.Context) {
-	// Get account ID from path parameter
-	accountId := cast.ToInt(ctx.Param("id"))
-	if accountId == 0 {
-		ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{
-			Code: myErrors.ErrInvalidArgument,
-			Data: map[string]any{"err": "Invalid account ID"},
-		})
-		return
-	}
-
-	account, err := accountService.GetAccountCredentials(ctx, accountId)
-	if err != nil {
-		if err.Error() == "account not found" {
-			ctx.AbortWithError(http.StatusNotFound, &myErrors.ApiError{
-				Data: map[string]any{"err": "Account not found"},
-			})
-		} else if err.Error() == "permission denied" {
-			ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{
-				Code: myErrors.ErrNoPerm,
-				Data: map[string]any{"perm": acl.READ},
-			})
-		} else {
-			ctx.AbortWithError(http.StatusInternalServerError, &myErrors.ApiError{
-				Code: myErrors.ErrInternal,
-				Data: map[string]any{"err": err.Error()},
-			})
-		}
-		return
-	}
-
-	ctx.JSON(http.StatusOK, HttpResponse{
-		Data: account,
-	})
+	c.GetAccountCredentials(ctx)
 }
 
 // GetAccountIdsByAuthorization gets account IDs by authorization

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -11,6 +12,8 @@ import (
 	"github.com/veops/oneterm/internal/acl"
 	"github.com/veops/oneterm/internal/api/router"
 	"github.com/veops/oneterm/internal/model"
+	"github.com/veops/oneterm/internal/repository"
+	"github.com/veops/oneterm/internal/schedule"
 	"github.com/veops/oneterm/internal/service"
 	fileservice "github.com/veops/oneterm/internal/service/file"
 	webproxy "github.com/veops/oneterm/internal/service/web_proxy"
@@ -21,8 +24,10 @@ import (
 )
 
 var (
-	ctx, cancel = context.WithCancel(context.Background())
-	srv         = &http.Server{}
+	ctx, cancel    = context.WithCancel(context.Background())
+	srv            = &http.Server{}
+	initializeOnce sync.Once
+	initializeErr  error
 )
 
 func initDB() {
@@ -35,6 +40,10 @@ func initDB() {
 		model.DefaultSession, model.DefaultSessionCmd, model.DefaultShare, model.DefaultQuickCommand,
 		model.DefaultUserPreference, model.DefaultStorageConfig, model.DefaultStorageMetrics,
 		model.DefaultTimeTemplate, model.DefaultMigrationRecord, model.DefaultSystemConfig,
+		&model.PAMDataKey{}, &model.PAMCredentialVersion{}, &model.PAMAssetAccountBinding{},
+		&model.PAMApplication{}, &model.PAMAccessAudit{},
+		&model.PAMExecution{},
+		&model.PAMPolicy{}, &model.PAMAccessRequest{}, &model.PAMSessionLease{},
 	); err != nil {
 		logger.L().Fatal("Failed to init database", zap.Error(err))
 	}
@@ -47,7 +56,18 @@ func initDB() {
 }
 
 func initServices() {
+	credentials, err := repository.ConfiguredCredentials()
+	if err == nil {
+		err = credentials.EnsureDataKey(ctx)
+	}
+	if err != nil {
+		logger.L().Fatal("Failed to initialize credential storage", zap.Error(err))
+	}
+	if err := service.EnsurePasswordViewPolicy(ctx); err != nil {
+		logger.L().Fatal("Failed to initialize password view settings", zap.Error(err))
+	}
 	service.InitAuthorizationService()
+	schedule.RegisterPAMWork(service.ProcessPAMITSMWork)
 	fileservice.InitFileService()
 
 	// Initialize predefined dangerous commands and templates
@@ -81,13 +101,18 @@ func initStorage() error {
 	return nil
 }
 
-func RunApi() error {
-	initDB()
-	initServices()
+func Initialize() error {
+	initializeOnce.Do(func() {
+		initDB()
+		initServices()
+		initializeErr = initStorage()
+	})
+	return initializeErr
+}
 
-	// Initialize storage
-	if err := initStorage(); err != nil {
-		logger.L().Fatal("Failed to init storage", zap.Error(err))
+func RunApi() error {
+	if err := Initialize(); err != nil {
+		return err
 	}
 
 	r := gin.New()

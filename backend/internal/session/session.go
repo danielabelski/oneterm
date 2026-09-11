@@ -112,6 +112,17 @@ func NewSessionChans() *SessionChans {
 	}
 }
 
+func (c *SessionChans) SendOutput(ctx context.Context, data []byte) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-c.AwayChan:
+		return false
+	case c.OutChan <- data:
+		return true
+	}
+}
+
 type Session struct {
 	*model.Session
 	G            *errgroup.Group `json:"-" gorm:"-"`
@@ -134,8 +145,37 @@ type Session struct {
 	sshMutex  sync.RWMutex  `json:"-" gorm:"-"`
 
 	// Web session support
-	WebSession  interface{}            `json:"-" gorm:"-"`
-	Permissions *model.AuthPermissions `json:"-" gorm:"-"`
+	WebSession         interface{}                `json:"-" gorm:"-"`
+	Permissions        *model.AuthPermissions     `json:"-" gorm:"-"`
+	PAMAuthorization   *model.PAMConnectionPermit `json:"-" gorm:"-"`
+	pamTransportMu     sync.Mutex
+	pamTransportClose  func()
+	pamTransportClosed bool
+}
+
+func (s *Session) SetPAMTransportClose(closeTransport func()) {
+	if s.PAMAuthorization == nil {
+		return
+	}
+	s.pamTransportMu.Lock()
+	alreadyClosed := s.pamTransportClosed
+	if !alreadyClosed {
+		s.pamTransportClose = closeTransport
+	}
+	s.pamTransportMu.Unlock()
+	if alreadyClosed {
+		closeTransport()
+	}
+}
+
+func (s *Session) ClosePAMTransport() {
+	s.pamTransportMu.Lock()
+	closeTransport := s.pamTransportClose
+	s.pamTransportClosed, s.pamTransportClose = true, nil
+	s.pamTransportMu.Unlock()
+	if closeTransport != nil {
+		closeTransport()
+	}
 }
 
 func (m *Session) HasMonitors() (has bool) {

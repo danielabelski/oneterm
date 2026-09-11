@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"runtime"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
 	"github.com/spf13/cast"
 	"go.uber.org/zap"
@@ -22,6 +24,14 @@ import (
 var (
 	RC = resty.NewWithClient(&http.Client{}).SetRetryCount(3)
 )
+
+// CopyContext preserves legacy Gin context semantics without retaining its pooled instance.
+func CopyContext(ctx context.Context) context.Context {
+	if request, ok := ctx.(*gin.Context); ok {
+		return request.Copy()
+	}
+	return ctx
+}
 
 func GetAclToken(ctx context.Context) (res string, err error) {
 	res, err = cache.RC.Get(ctx, "aclToken").Result()
@@ -36,6 +46,7 @@ func GetAclToken(ctx context.Context) (res string, err error) {
 
 	data := make(map[string]string)
 	resp, err := RC.R().
+		SetContext(CopyContext(ctx)).
 		SetBody(map[string]any{"app_id": aclConfig.AppId, "secret_key": secretKey}).
 		SetResult(&data).
 		Post(url)
@@ -53,14 +64,26 @@ func HandleErr(e error, resp *resty.Response, isOk func(dt map[string]any) bool)
 
 	defer func() {
 		if err != nil {
-			bs, _ := json.Marshal(resp.Request.Body)
-			logger.L().Error(fmt.Sprintf("%s failed", runtime.FuncForPC(pc).Name()), zap.String("url", resp.Request.URL), zap.String("req", string(bs)), zap.String("resp", resp.String()))
+			fields := []zap.Field{zap.String("error_type", fmt.Sprintf("%T", err))}
+			if resp != nil {
+				fields = append(fields, zap.Int("status", resp.StatusCode()))
+				if resp.Request != nil {
+					fields = append(fields, zap.String("method", resp.Request.Method))
+					if endpoint, parseErr := url.Parse(resp.Request.URL); parseErr == nil {
+						fields = append(fields, zap.String("host", endpoint.Host), zap.String("path", endpoint.Path))
+					}
+				}
+			}
+			logger.L().Error(fmt.Sprintf("%s failed", runtime.FuncForPC(pc).Name()), fields...)
 		}
 	}()
 
 	err = e
 	if err != nil {
 		return err
+	}
+	if resp == nil {
+		return fmt.Errorf("upstream response is unavailable")
 	}
 
 	dt := make(map[string]any)

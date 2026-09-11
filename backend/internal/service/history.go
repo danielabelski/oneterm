@@ -39,7 +39,7 @@ func (s *HistoryService) CreateHistoryRecord(ctx context.Context, actionType int
 		clientIP = ginCtx.ClientIP()
 	}
 
-	return &model.History{
+	history := &model.History{
 		RemoteIp:   clientIP,
 		Type:       modelObj.TableName(),
 		TargetId:   modelObj.GetId(),
@@ -48,6 +48,35 @@ func (s *HistoryService) CreateHistoryRecord(ctx context.Context, actionType int
 		New:        toMap(modelObj),
 		CreatorId:  userId,
 		CreatedAt:  time.Now(),
+	}
+	RedactHistory(history)
+	return history
+}
+
+// RedactHistory also protects reads of history written by older versions.
+func RedactHistory(history *model.History) {
+	if history == nil {
+		return
+	}
+	for _, data := range []model.Map[string, any]{history.Old, history.New} {
+		switch history.Type {
+		case model.PAMOwnerAccount, model.PAMOwnerGateway:
+			for _, key := range []string{"password", "pk", "phrase"} {
+				if _, present := data[key]; present {
+					data[key] = "[redacted]"
+				}
+			}
+		case "asset":
+			web, _ := data["web_config"].(map[string]any)
+			accounts, _ := web["login_accounts"].([]any)
+			for _, entry := range accounts {
+				if account, ok := entry.(map[string]any); ok {
+					if _, present := account["password"]; present {
+						account["password"] = "[redacted]"
+					}
+				}
+			}
+		}
 	}
 }
 

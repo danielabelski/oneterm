@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/veops/oneterm/internal/service"
 	"github.com/veops/oneterm/pkg/config"
 	myErrors "github.com/veops/oneterm/pkg/errors"
+	"github.com/veops/oneterm/pkg/logger"
 	"github.com/veops/oneterm/pkg/remote"
 )
 
@@ -91,6 +93,18 @@ func doCreate[T model.Model](ctx *gin.Context, needAcl bool, md T, resourceType 
 	}
 
 	resourceId := 0
+	persisted := false
+	defer func() {
+		if _, credential := any(md).(model.CredentialOwner); !credential || persisted || !needAcl || resourceId <= 0 {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx.Request.Context()), 5*time.Second)
+		defer cancel()
+		if cleanupErr := acl.DeleteResource(cleanupCtx, currentUser.Uid, resourceId); cleanupErr != nil {
+			logger.L().Error("Failed credential creation requires ACL resource cleanup",
+				zap.Int("resource_id", resourceId), zap.String("resource_type", resourceType))
+		}
+	}()
 	if needAcl {
 		_, ok := any(md).(*model.Node)
 		resourceId, err = acl.CreateGrantAcl(ctx, currentUser, resourceType, md.GetName()+lo.Ternary(ok, time.Now().Format(time.RFC3339), ""))
@@ -105,8 +119,18 @@ func doCreate[T model.Model](ctx *gin.Context, needAcl bool, md T, resourceType 
 	md.SetUpdaterId(currentUser.Uid)
 
 	if err = baseService.ExecuteInTransaction(ctx, func(tx *gorm.DB) (err error) {
-		if err = tx.Model(md).Create(md).Error; err != nil {
+		insert := tx.Model(md)
+		if _, ok := any(md).(model.CredentialOwner); ok {
+			insert = insert.Omit(service.CredentialStorageFields...)
+		}
+		if err = insert.Create(md).Error; err != nil {
 			return
+		}
+		if owner, ok := any(md).(model.CredentialOwner); ok {
+			if err = service.CreateStoredCredential(ctx.Request.Context(), tx, owner, currentUser.Uid); err != nil {
+				return
+			}
+			return tx.Create(historyService.CreateHistoryRecord(ctx, model.ACTION_CREATE, md, nil, currentUser.Uid)).Error
 		}
 
 		switch t := any(md).(type) {
@@ -130,6 +154,10 @@ func doCreate[T model.Model](ctx *gin.Context, needAcl bool, md T, resourceType 
 		err = historyService.CreateAndSaveHistory(ctx, model.ACTION_CREATE, md, nil, currentUser.Uid)
 		return
 	}); err != nil {
+		if errors.Is(err, service.ErrCredentialInput) {
+			ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrCredentialInput})
+			return
+		}
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrDuplicateName, Data: map[string]any{"err": err}})
 			return
@@ -138,6 +166,7 @@ func doCreate[T model.Model](ctx *gin.Context, needAcl bool, md T, resourceType 
 		return
 	}
 
+	persisted = true
 	ctx.JSON(http.StatusOK, HttpResponse{
 		Data: map[string]any{
 			"id": md.GetId(),
@@ -262,6 +291,13 @@ func doUpdate[T model.Model](ctx *gin.Context, needAcl bool, md T, resourceType 
 	if len(bodyBytes) > 0 {
 		json.Unmarshal(bodyBytes, &bodyFields)
 	}
+	if _, credential := any(md).(model.CredentialOwner); credential {
+		// Authentication caches and consumes JSON. Credential replacement needs the original field presence.
+		if err = ctx.ShouldBindBodyWithJSON(&bodyFields); err != nil {
+			ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrInvalidArgument, Data: map[string]any{"err": err}})
+			return
+		}
+	}
 
 	if err = ctx.ShouldBindBodyWithJSON(md); err != nil {
 		ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrInvalidArgument, Data: map[string]any{"err": err}})
@@ -297,17 +333,30 @@ func doUpdate[T model.Model](ctx *gin.Context, needAcl bool, md T, resourceType 
 			return
 		}
 
-		_, ok := any(md).(*model.Node)
-		if err = acl.UpdateResource(ctx, currentUser.GetUid(), old.GetResourceId(),
-			map[string]string{"name": lo.Ternary(ok, cast.ToString(md.GetId()), md.GetName())}); err != nil {
-			handleRemoteErr(ctx, err)
-			return
+		rename := true
+		if _, ok := any(md).(model.CredentialOwner); ok {
+			_, rename = bodyFields["name"]
+			rename = rename && md.GetName() != old.GetName()
+		}
+		if rename {
+			_, ok := any(md).(*model.Node)
+			if err = acl.UpdateResource(ctx, currentUser.GetUid(), old.GetResourceId(),
+				map[string]string{"name": lo.Ternary(ok, cast.ToString(md.GetId()), md.GetName())}); err != nil {
+				handleRemoteErr(ctx, err)
+				return
+			}
 		}
 	}
 	md.SetId(id)
 
 	if err = baseService.ExecuteInTransaction(ctx, func(tx *gorm.DB) (err error) {
 		omits := []string{"resource_id", "created_at", "deleted_at"}
+		if owner, ok := any(md).(model.CredentialOwner); ok {
+			if err = service.UpdateStoredCredential(ctx.Request.Context(), tx, owner, currentUser.Uid, bodyFields); err != nil {
+				return
+			}
+			omits = append(omits, service.CredentialStorageFields...)
+		}
 		var selects []string
 
 		// Build dynamic selects based on fields present in request body
@@ -337,7 +386,9 @@ func doUpdate[T model.Model](ctx *gin.Context, needAcl bool, md T, resourceType 
 				}
 			case *model.Account:
 				// For accounts, allow selective field updates for sensitive data
-				allowedFields = []string{"name", "account", "account_type", "password", "pk", "phrase"}
+				allowedFields = []string{"name", "account", "account_type"}
+			case *model.Gateway:
+				allowedFields = []string{"name", "host", "port", "account", "account_type"}
 			}
 
 			// Build selects list based on which fields are present in body
@@ -354,7 +405,11 @@ func doUpdate[T model.Model](ctx *gin.Context, needAcl bool, md T, resourceType 
 
 		// If no fields specified or no allowed fields matched, update all fields
 		if len(selects) == 0 {
-			selects = []string{"*"}
+			if _, ok := any(md).(model.CredentialOwner); ok {
+				selects = []string{"updated_at", "updater_id"}
+			} else {
+				selects = []string{"*"}
+			}
 		}
 
 		if err = tx.Select(selects).Omit(omits...).Save(md).Error; err != nil {
@@ -362,11 +417,22 @@ func doUpdate[T model.Model](ctx *gin.Context, needAcl bool, md T, resourceType 
 		}
 
 		// Create history using history service
+		if _, ok := any(md).(model.CredentialOwner); ok {
+			updated := getEmpty(md)
+			if err := tx.Omit(service.CredentialStorageFields...).First(updated, md.GetId()).Error; err != nil {
+				return err
+			}
+			return tx.Create(historyService.CreateHistoryRecord(ctx, model.ACTION_UPDATE, updated, old, currentUser.Uid)).Error
+		}
 		err = historyService.CreateAndSaveHistory(ctx, model.ACTION_UPDATE, md, old, currentUser.Uid)
 		return
 	}); err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrDuplicateName, Data: map[string]any{"err": err}})
+			return
+		}
+		if errors.Is(err, service.ErrCredentialInput) {
+			ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrCredentialInput})
 			return
 		}
 		ctx.AbortWithError(http.StatusInternalServerError, &myErrors.ApiError{Code: myErrors.ErrInternal, Data: map[string]any{"err": err}})

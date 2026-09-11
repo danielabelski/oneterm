@@ -28,12 +28,11 @@ func CreateGrantAcl(ctx context.Context, session *Session, resourceType string, 
 	if err != nil {
 		return
 	}
+	resourceId = resource.ResourceId
 
 	if err = GrantRoleResource(ctx, session.GetUid(), session.Acl.Rid, resource.ResourceId, AllPermissions); err != nil {
 		return
 	}
-
-	resourceId = resource.ResourceId
 
 	return
 }

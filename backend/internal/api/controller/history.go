@@ -35,7 +35,11 @@ func (c *Controller) GetHistories(ctx *gin.Context) {
 		return
 	}
 
-	doGet[*model.History](ctx, false, db, "")
+	doGet[*model.History](ctx, false, db, "", func(_ *gin.Context, histories []*model.History) {
+		for _, history := range histories {
+			service.RedactHistory(history)
+		}
+	})
 }
 
 // GetSessions godoc

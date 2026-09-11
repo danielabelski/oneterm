@@ -365,6 +365,7 @@ type AuthResult struct {
 // BatchAuthResult represents the result of a batch authorization check
 type BatchAuthResult struct {
 	Results map[AuthAction]*AuthResult `json:"results"`
+	PAM     *PAMConnectionPermit       `json:"-"`
 }
 
 // IsAllowed checks if a specific action is allowed in the batch result

@@ -11,10 +11,13 @@ import (
 	"github.com/veops/oneterm/internal/api/docs"
 	"github.com/veops/oneterm/internal/api/middleware"
 	"github.com/veops/oneterm/internal/sshsrv"
+	"github.com/veops/oneterm/pkg/config"
 )
 
 func SetupRouter(r *gin.Engine) {
-	r.SetTrustedProxies([]string{"0.0.0.0/0", "::/0"})
+	if err := middleware.ConfigureTrustedProxies(r, config.Cfg.Http.TrustedProxies); err != nil {
+		panic(err)
+	}
 	r.MaxMultipartMemory = 1 << 20 // 1MB to prevent memory overflow
 	r.Use(gin.Recovery(), middleware.LoggerMiddleware())
 
@@ -52,6 +55,48 @@ func SetupRouter(r *gin.Engine) {
 
 	v1 := r.Group("/api/oneterm/v1", middleware.Error2RespMiddleware(), middleware.AuthMiddleware())
 	v1AuthAbandoned := r.Group("/api/oneterm/v1", middleware.Error2RespMiddleware())
+	v1AuthAbandoned.POST("/pam/application/credentials", c.RetrievePAMApplicationCredential)
+	v1.GET("/pam/applications", c.GetPAMApplications)
+	v1.POST("/pam/applications", c.CreatePAMApplication)
+	v1.PUT("/pam/applications/:id", c.UpdatePAMApplication)
+	v1.POST("/pam/applications/:id/disable", c.DisablePAMApplication)
+	v1.GET("/pam/targets", c.GetPAMTargets)
+	v1.GET("/pam/capabilities", c.GetPAMCapabilities)
+	v1.GET("/config/password-view", c.GetPasswordViewSettings)
+	v1.PUT("/config/password-view", c.SavePasswordViewSettings)
+	v1.GET("/pam/password-view/accounts", c.GetPasswordViewAccounts)
+	v1.GET("/pam/password-view/audit", c.GetPasswordViewAudit)
+	v1.GET("/pam/password-view/:kind/:id", c.GetPasswordViewStatus)
+	v1.POST("/pam/password-view/:kind/:id/requests", c.CreatePasswordViewRequest)
+	v1.POST("/pam/password-view/:kind/:id/read", c.ReadPasswordView)
+	v1.GET("/pam/itsm/templates", c.GetPAMITSMTemplates)
+	v1.GET("/pam/itsm/templates/:id", c.GetPAMITSMTemplate)
+	v1.GET("/pam/policies/:kind/:id", c.GetPAMPolicy)
+	v1.PUT("/pam/policies/:kind/:id", c.SavePAMPolicy)
+	v1.GET("/pam/requests", c.GetPAMRequests)
+	v1.GET("/pam/request-targets", c.GetPAMRequestTargets)
+	v1.GET("/pam/request-targets/:id/bindings", c.GetPAMRequestBindings)
+	v1.POST("/pam/requests", c.CreatePAMRequest)
+	v1.GET("/pam/requests/:id", c.GetPAMRequest)
+	v1.POST("/pam/requests/:id/cancel", c.CancelPAMRequest)
+	v1.POST("/pam/requests/:id/retry-sync", c.RetryPAMRequestSync)
+	v1.GET("/pam/adoption/assets", c.GetPAMAdoptionAssets)
+	v1.GET("/pam/accounts/:id", c.GetPAMAccount)
+	v1.POST("/pam/accounts/adopt", c.AdoptPAMAccount)
+	v1.GET("/pam/accounts/:id/bindings", c.GetPAMAccountBindings)
+	v1.POST("/pam/accounts/:id/bindings", c.AttachPAMAccount)
+	v1.PUT("/pam/accounts/:id/bindings", c.ReviewPAMBinding)
+	v1.PUT("/pam/accounts/:id/bindings/:binding_id/password", c.SavePAMPasswordConfig)
+	v1.GET("/pam/accounts/:id/password/executors", c.GetPAMPasswordExecutors)
+	v1.POST("/pam/accounts/:id/password/verify", c.VerifyPAMPassword)
+	v1.GET("/pam/accounts/:id/password/executions", c.GetPAMPasswordExecutions)
+	v1.POST("/pam/accounts/:id/password/executions", c.StartPAMPasswordChange)
+	v1.POST("/pam/accounts/:id/password/executions/:execution_id/:operation", c.ContinuePAMPassword)
+	v1.POST("/pam/accounts/:id/disable", c.DisablePAMAccount)
+	v1.POST("/pam/accounts/:id/enable", c.EnablePAMAccount)
+	v1.DELETE("/pam/accounts/:id/management", c.RemovePAMAccountManagement)
+	v1.POST("/pam/credentials/:kind/:id", c.RetrievePAMHumanCredential)
+	v1.GET("/pam/audit", c.GetPAMAccessAudit)
 	{
 		account := v1.Group("account")
 		{

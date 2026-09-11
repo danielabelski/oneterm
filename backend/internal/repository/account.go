@@ -123,6 +123,16 @@ func (r *accountRepository) AttachAssetCount(ctx context.Context, accounts []*mo
 
 // CheckAssetDependencies checks if account has dependent assets using V2 authorization system
 func (r *accountRepository) CheckAssetDependencies(ctx context.Context, id int) (string, error) {
+	var bound struct{ Name string }
+	result := dbpkg.DB.WithContext(ctx).Model(&model.PAMAssetAccountBinding{}).Select("asset.name").
+		Joins("JOIN asset ON asset.id = pam_asset_account_binding.asset_id AND asset.deleted_at = 0").
+		Where("pam_asset_account_binding.account_id = ?", id).Limit(1).Scan(&bound)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected > 0 {
+		return bound.Name, nil
+	}
 	// Get all V2 authorization rules where both account and asset selectors are 'ids' type
 	var rules []*model.AuthorizationV2
 	if err := dbpkg.DB.Model(&model.AuthorizationV2{}).

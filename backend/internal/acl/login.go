@@ -132,6 +132,18 @@ func ParseCookie(cookie string) (sess *Session, err error) {
 		logger.L().Error("cannot unmarshal to session", zap.Error(err))
 		return
 	}
+	var authContext struct {
+		TokenHash  string `json:"token_hash"`
+		MFASession string `json:"mfa_session"`
+	}
+	if err = json.Unmarshal(content, &authContext); err != nil {
+		return nil, err
+	}
+	value := authContext.TokenHash
+	if value == "" {
+		value = authContext.MFASession
+	}
+	sess.authBinding = identityBinding("session", value)
 
 	return
 }

@@ -440,3 +440,68 @@ other = "kernel"
 [TagModule]
 one = "module"
 other = "module"
+
+[MsgMFARequired]
+one = "Verify MFA again before this operation"
+other = "Verify MFA again before this operation"
+
+[MsgCredentialInput]
+one = "Provide a complete credential when replacing its value or authentication type"
+other = "Provide a complete credential when replacing its value or authentication type"
+
+[MsgPAMIdentity]
+other = "The application request identity is invalid"
+
+[MsgPAMDenied]
+other = "Credential access is not permitted"
+
+[MsgPAMConflict]
+other = "The resource name or identity is already registered"
+
+[MsgPAMReplay]
+other = "The request evidence has expired or was already used"
+
+[MsgPAMRevision]
+other = "The record changed. Reload before saving"
+
+[MsgPAMInput]
+other = "Check the application identity, credential targets and access settings"
+
+[MsgPAMUnavailable]
+other = "Credential access is temporarily unavailable"
+
+[MsgPAMTemplateDenied]
+other = "You cannot initiate this approval workflow. Ask an administrator to check the ITSM template visibility and submission-node assignees"
+
+[MsgPAMBindingChanged]
+other = "The target route changed. Review the managed account binding before connecting"
+
+[MsgPAMBindingUnavailable]
+other = "The managed account or its binding is unavailable"
+
+[MsgPAMApprovalRequired]
+other = "An approved access request is required"
+
+[MsgPAMRequestState]
+other = "The request changed. Reload before continuing"
+
+[MsgPAMScopeChanged]
+other = "The target, credential or access policy changed. Submit a new request"
+
+[MsgPAMProviderUnavailable]
+other = "This operation or approval provider is not available"
+
+[MsgPAMSessionEnded]
+other = "The access authorization is no longer valid. The connection has been closed"
+
+[MsgPAMSessionCapacity]
+other = "The account's concurrent session limit has been reached"
+
+[MsgPAMSessionConflict]
+other = "This connection identifier has already been used. Start a new connection"
+
+[MsgPAMCredentialShared]
+other = "This account is associated with other assets. Use a dedicated account before managing a local password"
+
+[MsgPAMExecutionState]
+other = "The password task state does not allow this operation. Review the password operation history first"

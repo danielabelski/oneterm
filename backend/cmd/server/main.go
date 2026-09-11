@@ -16,6 +16,9 @@ import (
 )
 
 func main() {
+	if err := api.Initialize(); err != nil {
+		logger.L().Fatal("Failed to initialize services", zap.Error(err))
+	}
 	rg := run.Group{}
 	{
 		term := make(chan os.Signal, 1)

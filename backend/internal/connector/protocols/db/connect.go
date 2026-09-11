@@ -66,6 +66,7 @@ func connectDB(sess *gsession.Session, asset *model.Asset, account *model.Accoun
 	}
 
 	// Set standard terminal size
+	sess.SetPAMTransportClose(func() { ptmx.Close() })
 	_ = pty.Setsize(ptmx, &pty.Winsize{
 		Cols: 80,
 		Rows: 24,
@@ -209,7 +210,9 @@ func connectDB(sess *gsession.Session, asset *model.Asset, account *model.Accoun
 				utf8.EncodeRune(p, rn)
 
 				// Send to OutChan for HandleTerm processing
-				chs.OutChan <- p
+				if !chs.SendOutput(sess.Gctx, p) {
+					return nil
+				}
 			}
 		}
 	})

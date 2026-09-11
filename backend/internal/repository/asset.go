@@ -12,7 +12,6 @@ import (
 	"github.com/veops/oneterm/internal/model"
 	"github.com/veops/oneterm/pkg/config"
 	dbpkg "github.com/veops/oneterm/pkg/db"
-	"github.com/veops/oneterm/pkg/utils"
 	"gorm.io/gorm"
 )
 
@@ -246,25 +245,36 @@ func HandleAssetIds(ctx context.Context, dbFind *gorm.DB, resIds []int) (db *gor
 	return
 }
 
-// GetAAG retrieves Asset, Account, and Gateway by their IDs with decrypted credentials
-func GetAAG(assetId int, accountId int) (asset *model.Asset, account *model.Account, gateway *model.Gateway, err error) {
+// GetAAGMetadata loads the records needed for authorization without resolving secrets.
+func GetAAGMetadata(ctx context.Context, assetId int, accountId int) (asset *model.Asset, account *model.Account, gateway *model.Gateway, err error) {
 	asset, account, gateway = &model.Asset{}, &model.Account{}, &model.Gateway{}
-	if err = dbpkg.DB.Model(asset).Where("id = ?", assetId).First(asset).Error; err != nil {
+	if err = dbpkg.DB.WithContext(ctx).Model(asset).Where("id = ?", assetId).First(asset).Error; err != nil {
 		return
 	}
-	if err = dbpkg.DB.Model(account).Where("id = ?", accountId).First(account).Error; err != nil {
+	if err = dbpkg.DB.WithContext(ctx).Model(account).Where("id = ?", accountId).First(account).Error; err != nil {
 		return
 	}
-	account.Password = utils.DecryptAES(account.Password)
-	account.Pk = utils.DecryptAES(account.Pk)
-	account.Phrase = utils.DecryptAES(account.Phrase)
 	if asset.GatewayId != 0 {
-		if err = dbpkg.DB.Model(gateway).Where("id = ?", asset.GatewayId).First(gateway).Error; err != nil {
+		if err = dbpkg.DB.WithContext(ctx).Model(gateway).Where("id = ?", asset.GatewayId).First(gateway).Error; err != nil {
 			return
 		}
-		gateway.Password = utils.DecryptAES(gateway.Password)
-		gateway.Pk = utils.DecryptAES(gateway.Pk)
-		gateway.Phrase = utils.DecryptAES(gateway.Phrase)
+	}
+	return
+}
+
+// GetAAG is used by file operations whose controller has already authorized the action.
+func GetAAG(assetId int, accountId int) (asset *model.Asset, account *model.Account, gateway *model.Gateway, err error) {
+	asset, account, gateway, err = GetAAGMetadata(context.Background(), assetId, accountId)
+	if err != nil {
+		return
+	}
+	if err = ResolveAssetAccountCredential(context.Background(), asset, account); err != nil {
+		return
+	}
+	if asset.GatewayId != 0 {
+		if err = ResolveCredential(context.Background(), gateway); err != nil {
+			return
+		}
 	}
 
 	return

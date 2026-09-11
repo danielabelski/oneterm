@@ -8,10 +8,17 @@ import (
 )
 
 const (
-	WRITE  = "write"
-	DELETE = "delete"
-	READ   = "read"
-	GRANT  = "grant"
+	WRITE         = "write"
+	DELETE        = "delete"
+	READ          = "read"
+	GRANT         = "grant"
+	Retrieve      = "retrieve"
+	UpdateSecret  = "update_secret"
+	VerifySecret  = "verify_secret"
+	RotateSecret  = "rotate_secret"
+	RecoverSecret = "recover_secret"
+	ManagePolicy  = "manage_policy"
+	RequestAccess = "request_access"
 )
 
 var (
@@ -59,9 +66,10 @@ type Acl struct {
 }
 
 type Session struct {
-	Uid    int          `json:"uid"`
-	Acl    Acl          `json:"acl"`
-	Cookie *http.Cookie `json:"raw"`
+	Uid         int          `json:"uid"`
+	Acl         Acl          `json:"acl"`
+	Cookie      *http.Cookie `json:"raw"`
+	authBinding string
 }
 
 func (s *Session) GetUid() int {

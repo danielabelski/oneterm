@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"reflect"
 	"time"
 
@@ -75,6 +74,7 @@ type IAuthorizationService interface {
 
 	// V2 methods
 	HasAuthorizationV2(ctx *gin.Context, sess *gsession.Session, actions ...model.AuthAction) (*model.BatchAuthResult, error)
+	HasStandingAuthorizationV2(ctx *gin.Context, sess *gsession.Session, actions ...model.AuthAction) (*model.BatchAuthResult, error)
 	CheckPermission(ctx *gin.Context, nodeId, assetId, accountId int, action model.AuthAction) (*model.AuthResult, error)
 }
 
@@ -402,6 +402,26 @@ func (s *AuthorizationService) HasAuthorization(ctx *gin.Context, sess *gsession
 
 // HasAuthorizationV2 implements the new V2 authorization logic
 func (s *AuthorizationService) HasAuthorizationV2(ctx *gin.Context, sess *gsession.Session, actions ...model.AuthAction) (*model.BatchAuthResult, error) {
+	if sess == nil || sess.Session == nil {
+		return nil, ErrPAMDenied
+	}
+	checks := append([]model.AuthAction{}, actions...)
+	hasConnect := lo.Contains(checks, model.ActionConnect)
+	if !hasConnect {
+		checks = append(checks, model.ActionConnect)
+	}
+	result, err := s.HasStandingAuthorizationV2(ctx, sess, checks...)
+	if err != nil {
+		return result, err
+	}
+	result, err = authorizePAMConnection(ctx, s.db, sess, result)
+	if result != nil && !hasConnect {
+		delete(result.Results, model.ActionConnect)
+	}
+	return result, err
+}
+
+func (s *AuthorizationService) HasStandingAuthorizationV2(ctx *gin.Context, sess *gsession.Session, actions ...model.AuthAction) (*model.BatchAuthResult, error) {
 	currentUser, _ := acl.GetSessionFromCtx(ctx)
 
 	// Helper function to create batch result for all actions
@@ -440,7 +460,7 @@ func (s *AuthorizationService) HasAuthorizationV2(ctx *gin.Context, sess *gsessi
 
 	// Load asset if not already loaded
 	if sess.Session.Asset == nil {
-		if err := s.db.Model(sess.Session.Asset).Where("id=?", sess.AssetId).First(&sess.Session.Asset).Error; err != nil {
+		if err := s.db.WithContext(ctx.Request.Context()).Model(&model.Asset{}).Where("id=?", sess.AssetId).First(&sess.Session.Asset).Error; err != nil {
 			return createBatchResult(false, "Asset not found"), err
 		}
 	}
@@ -506,21 +526,7 @@ func (s *AuthorizationService) CheckPermission(ctx *gin.Context, nodeId, assetId
 
 // getClientIP extracts client IP from gin context
 func (s *AuthorizationService) getClientIP(ctx *gin.Context) string {
-	// Try to get real IP from headers first
-	clientIP := ctx.GetHeader("X-Forwarded-For")
-	if clientIP == "" {
-		clientIP = ctx.GetHeader("X-Real-IP")
-	}
-	if clientIP == "" {
-		clientIP = ctx.ClientIP()
-	}
-
-	// Parse and validate IP
-	if ip := net.ParseIP(clientIP); ip != nil {
-		return clientIP
-	}
-
-	return ""
+	return ctx.ClientIP()
 }
 
 // createV2AuthorizationRulesForAsset creates V2 authorization rules for an asset

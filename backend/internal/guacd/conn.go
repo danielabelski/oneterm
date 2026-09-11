@@ -309,6 +309,9 @@ func (t *Tunnel) assert(opcode string) (instruction *Instruction, err error) {
 }
 
 func (t *Tunnel) Close() {
+	if t.conn != nil {
+		t.conn.Close()
+	}
 	tunneling.CloseTunnels(t.SessionId)
 }
 

@@ -164,7 +164,7 @@ func DoConnect(ctx *gin.Context, ws *websocket.Conn) (sess *gsession.Session, er
 	currentUser, _ := acl.GetSessionFromCtx(ctx)
 
 	assetId, accountId := cast.ToInt(ctx.Param("asset_id")), cast.ToInt(ctx.Param("account_id"))
-	asset, account, gateway, err := repository.GetAAG(assetId, accountId)
+	asset, account, gateway, err := repository.GetAAGMetadata(ctx.Request.Context(), assetId, accountId)
 	if err != nil {
 		return
 	}
@@ -174,7 +174,7 @@ func DoConnect(ctx *gin.Context, ws *websocket.Conn) (sess *gsession.Session, er
 		sessionId = uuid.New().String()
 	}
 
-	sess = gsession.NewSession(ctx)
+	sess = gsession.NewSession(ctx.Request.Context())
 	sess.Ws = ws
 	sess.Session = &model.Session{
 		SessionType: ctx.GetInt("sessionType"),
@@ -243,6 +243,9 @@ func DoConnect(ctx *gin.Context, ws *websocket.Conn) (sess *gsession.Session, er
 	if protocol == "http" || protocol == "https" {
 		requiredActions = append(requiredActions, model.ActionFileDownload)
 	}
+	if protocol == "rdp" || protocol == "vnc" {
+		requiredActions = append(requiredActions, model.ActionCopy, model.ActionPaste, model.ActionFileUpload, model.ActionFileDownload)
+	}
 
 	// RDP/VNC are handled separately in ConnectGuacd with their own batch permission check
 	// but we still check connect permission here for consistency
@@ -257,6 +260,37 @@ func DoConnect(ctx *gin.Context, ws *websocket.Conn) (sess *gsession.Session, er
 	if !result.IsAllowed(model.ActionConnect) {
 		err = &myErrors.ApiError{Code: myErrors.ErrUnauthorized, Data: map[string]any{"perm": "connect"}}
 		return sess, err
+	}
+	sess.PAMAuthorization = result.PAM
+	if result.PAM != nil {
+		if err = service.AdmitPAMConnection(ctx.Request.Context(), sess.SessionId, result.PAM); err != nil {
+			if sess.IdleTk != nil {
+				sess.IdleTk.Stop()
+			}
+			return sess, pamConnectionError(err)
+		}
+		defer func() {
+			if err != nil {
+				stopPAMConnection(sess)
+				if sess.IdleTk != nil {
+					sess.IdleTk.Stop()
+				}
+				releasePAMConnection(sess)
+			}
+		}()
+		// A late dial result must not retain a sender after admission has expired.
+		sess.Chans.ErrChan = make(chan error, 1)
+		sess.SetPermissions(&model.AuthPermissions{Connect: true, Copy: result.IsAllowed(model.ActionCopy), Paste: result.IsAllowed(model.ActionPaste),
+			FileUpload: result.IsAllowed(model.ActionFileUpload), FileDownload: result.IsAllowed(model.ActionFileDownload)})
+	}
+	if err = repository.ResolveAssetAccountCredential(ctx.Request.Context(), asset, account); err != nil {
+		return sess, err
+	}
+	sess.AccountInfo = fmt.Sprintf("%s(%s)", account.Name, account.Account)
+	if gateway.Id != 0 {
+		if err = repository.ResolveCredential(ctx.Request.Context(), gateway); err != nil {
+			return sess, err
+		}
 	}
 
 	// Set permissions in session for protocol-specific usage
@@ -296,10 +330,30 @@ func DoConnect(ctx *gin.Context, ws *websocket.Conn) (sess *gsession.Session, er
 		logger.L().Error("wrong protocol " + sess.Protocol)
 	}
 
-	if err = <-sess.Chans.ErrChan; err != nil {
+	if sess.PAMAuthorization == nil {
+		err = <-sess.Chans.ErrChan
+	} else {
+		err = waitPAMConnection(ctx.Request.Context(), sess)
+	}
+	if err != nil {
 		logger.L().Error("failed to connect", zap.Error(err))
+		var admissionErr *myErrors.ApiError
+		if sess.PAMAuthorization != nil && errors.As(err, &admissionErr) {
+			return sess, admissionErr
+		}
 		err = &myErrors.ApiError{Code: myErrors.ErrConnectServer, Data: map[string]any{"err": err}}
 		return
+	}
+	if sess.PAMAuthorization != nil {
+		if err = service.ActivatePAMConnection(ctx.Request.Context(), sess.PAMAuthorization); err != nil {
+			return sess, pamConnectionError(err)
+		}
+		sess.G.Go(func() error {
+			err := service.WatchPAMConnection(sess.Gctx, sess.PAMAuthorization)
+			stopPAMConnection(sess)
+			releasePAMConnection(sess)
+			return err
+		})
 	}
 
 	gsession.GetOnlineSession().Store(sess.SessionId, sess)

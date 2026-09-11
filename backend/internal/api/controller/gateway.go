@@ -18,16 +18,11 @@ var (
 	gatewayService = service.NewGatewayService()
 
 	gatewayPreHooks = []preHook[*model.Gateway]{
-		// Validate public key
 		func(ctx *gin.Context, data *model.Gateway) {
-			if err := gatewayService.ValidatePublicKey(data); err != nil {
-				ctx.AbortWithError(http.StatusBadRequest, &errors.ApiError{Code: errors.ErrWrongPk, Data: nil})
+			if err := service.ValidateStoredCredential(data); err != nil {
+				ctx.AbortWithError(http.StatusBadRequest, &errors.ApiError{Code: errors.ErrCredentialInput})
 				return
 			}
-		},
-		// Encrypt sensitive data
-		func(ctx *gin.Context, data *model.Gateway) {
-			gatewayService.EncryptSensitiveData(data)
 		},
 	}
 
@@ -37,10 +32,6 @@ var (
 			if err := gatewayService.AttachAssetCount(ctx, data); err != nil {
 				return
 			}
-		},
-		// Decrypt sensitive data
-		func(ctx *gin.Context, data []*model.Gateway) {
-			gatewayService.DecryptSensitiveData(data)
 		},
 	}
 
@@ -86,7 +77,7 @@ func (c *Controller) DeleteGateway(ctx *gin.Context) {
 //	@Success	200		{object}	HttpResponse
 //	@Router		/gateway/:id [put]
 func (c *Controller) UpdateGateway(ctx *gin.Context) {
-	doUpdate(ctx, true, &model.Gateway{}, config.RESOURCE_GATEWAY, gatewayPreHooks...)
+	doUpdate(ctx, true, &model.Gateway{}, config.RESOURCE_GATEWAY)
 }
 
 // GetGateways godoc
@@ -108,6 +99,8 @@ func (c *Controller) GetGateways(ctx *gin.Context) {
 
 	// Build base query using service layer
 	db := gatewayService.BuildQuery(ctx)
+	db = db.Select("id", "name", "host", "port", "account", "account_type", "resource_id",
+		"creator_id", "updater_id", "created_at", "updated_at", "deleted_at")
 
 	// Apply authorization filter if needed
 	if info && !acl.IsAdmin(currentUser) {

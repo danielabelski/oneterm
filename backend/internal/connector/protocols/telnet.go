@@ -70,6 +70,7 @@ func ConnectTelnet(ctx *gin.Context, sess *gsession.Session, asset *model.Asset,
 	}
 
 	// Setup authentication control mechanisms
+	sess.SetPAMTransportClose(func() { conn.Close() })
 	authDone := make(chan bool, 1)
 	authErr := make(chan error, 1)
 	var prompt strings.Builder
@@ -113,7 +114,9 @@ func ConnectTelnet(ctx *gin.Context, sess *gsession.Session, asset *model.Asset,
 					// Process telnet protocol commands and extract actual data
 					processed := processTelnetData(buf[:n], conn)
 					if len(processed) > 0 {
-						chs.OutChan <- processed
+						if !chs.SendOutput(sess.Gctx, processed) {
+							return
+						}
 
 						// Update prompt buffer to detect login/password prompts
 						promptMutex.Lock()
@@ -277,7 +280,9 @@ func ConnectTelnet(ctx *gin.Context, sess *gsession.Session, asset *model.Asset,
 				if n > 0 {
 					data := processTelnetData(buf[:n], conn)
 					if len(data) > 0 {
-						chs.OutChan <- data
+						if !chs.SendOutput(sess.Gctx, data) {
+							return nil
+						}
 					}
 				}
 			}

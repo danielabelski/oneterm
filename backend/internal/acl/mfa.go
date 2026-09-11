@@ -1,6 +1,12 @@
 package acl
 
 import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"net/url"
 	"strings"
 	"time"
 
@@ -9,58 +15,84 @@ import (
 	"github.com/veops/oneterm/pkg/config"
 )
 
-// MFAIntrospectRequest represents the request to MFA introspect endpoint
+const (
+	PAMMFAAudience = "oneops:oneterm:pam"
+	PAMMFAIssuer   = "oneops:identity"
+	PAMMFARetrieve = "oneterm_pam_retrieve"
+	PAMMFAPolicy   = "oneterm_pam_policy"
+	PAMMFARotate   = "oneterm_pam_rotate"
+)
+
+var identityClient = resty.New().SetTimeout(5 * time.Second).SetRedirectPolicy(resty.NoRedirectPolicy())
+
 type MFAIntrospectRequest struct {
 	MfaToken string `json:"mfa_token"`
 }
 
-// MFAIntrospectResponse represents the response from MFA introspect endpoint
 type MFAIntrospectResponse struct {
-	Active bool   `json:"active"`
-	UID    int64  `json:"uid"`
-	Scope  string `json:"scope"`
-	Exp    int64  `json:"exp"`
+	Active      bool   `json:"active"`
+	Version     int    `json:"ver"`
+	ACLUID      int    `json:"acl_uid"`
+	SubjectType string `json:"subject_type"`
+	Scope       string `json:"scope"`
+	Audience    string `json:"aud"`
+	Issuer      string `json:"iss"`
+	Binding     string `json:"binding"`
+	Exp         int64  `json:"exp"`
+	AuthTime    int64  `json:"auth_time"`
 }
 
-// VerifyMFAToken verifies the MFA token by calling the introspect endpoint
-func VerifyMFAToken(mfaToken string) bool {
-	// Build URL from config, replacing v1 with common-setting/v1
-	baseURL := config.Cfg.Auth.Acl.Url
-	url := strings.Replace(baseURL, "/v1", "/common-setting/v1", 1) + "/mfa/introspect"
-
-	// Prepare request data
-	reqData := MFAIntrospectRequest{
-		MfaToken: mfaToken,
+func identityBinding(kind, value string) string {
+	if value == "" {
+		return ""
 	}
+	sum := sha256.Sum256([]byte(kind + ":" + value))
+	return hex.EncodeToString(sum[:])
+}
 
-	// Create resty client with timeout
-	client := resty.New().SetTimeout(5 * time.Second)
+func (m MFAIntrospectResponse) validFor(session *Session, scope string, now int64) bool {
+	return session != nil && session.Uid > 0 && session.authBinding != "" && scope != "" &&
+		m.Active && m.Version == 1 && m.ACLUID == session.Uid && m.SubjectType == "user" &&
+		m.Audience == PAMMFAAudience && m.Issuer == PAMMFAIssuer && m.Scope == scope &&
+		m.AuthTime > 0 && m.AuthTime <= now && m.AuthTime >= now-300 && m.Exp > now && m.Exp <= m.AuthTime+300 &&
+		hmac.Equal([]byte(m.Binding), []byte(session.authBinding))
+}
 
-	var mfaResp MFAIntrospectResponse
-	resp, err := client.R().
-		SetHeader("Content-Type", "application/json").
-		SetBody(reqData).
-		SetResult(&mfaResp).
-		Post(url)
+func identityEndpoint(suffix string) (string, error) {
+	endpoint, err := url.Parse(config.Cfg.Auth.Acl.Url)
+	if err != nil || endpoint.Host == "" || endpoint.User != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+		return "", errors.New("invalid identity service URL")
+	}
+	path := strings.TrimSuffix(endpoint.Path, "/")
+	if !strings.HasSuffix(path, "/v1") {
+		return "", errors.New("invalid identity service API path")
+	}
+	endpoint.Path = strings.TrimSuffix(path, "/v1") + "/common-setting/v1/" + suffix
+	endpoint.RawPath, endpoint.RawQuery, endpoint.Fragment = "", "", ""
+	return endpoint.String(), nil
+}
 
+func VerifyMFAToken(ctx context.Context, session *Session, token, scope string) bool {
+	if session == nil || session.Uid <= 0 || scope == "" || len(token) > 8192 {
+		return false
+	}
+	subject, err := getPAMKeySubject(ctx, session.Uid, true)
+	if err != nil || subject.Blocked {
+		return false
+	}
+	// Only the authenticated identity service can exempt the current user from MFA.
+	if subject.MFARequired != nil && !*subject.MFARequired {
+		return true
+	}
+	if session.authBinding == "" || token == "" {
+		return false
+	}
+	endpoint, err := identityEndpoint("mfa/introspect")
 	if err != nil {
 		return false
 	}
-
-	if resp.StatusCode() != 200 {
-		return false
-	}
-
-	// Check if token is active
-	if !mfaResp.Active {
-		return false
-	}
-
-	// Check if token is not expired
-	now := time.Now().Unix()
-	if mfaResp.Exp > 0 && now > mfaResp.Exp {
-		return false
-	}
-
-	return true
+	var result MFAIntrospectResponse
+	response, err := identityClient.R().SetContext(ctx).SetBody(MFAIntrospectRequest{MfaToken: token}).
+		SetResult(&result).Post(endpoint)
+	return err == nil && response.StatusCode() == 200 && result.validFor(session, scope, time.Now().Unix())
 }

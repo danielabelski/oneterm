@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net"
@@ -13,10 +14,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/veops/oneterm/internal/model"
+	"github.com/veops/oneterm/internal/repository"
 	"github.com/veops/oneterm/internal/tunneling"
 	dbpkg "github.com/veops/oneterm/pkg/db"
 	"github.com/veops/oneterm/pkg/logger"
-	"github.com/veops/oneterm/pkg/utils"
 )
 
 // ConnectableResult represents the result of a connectivity check
@@ -109,9 +110,9 @@ func getGatewayMap(assets []*model.Asset) (map[int]*model.Gateway, error) {
 
 	// Decrypt gateway credentials
 	for _, g := range gateways {
-		g.Password = utils.DecryptAES(g.Password)
-		g.Pk = utils.DecryptAES(g.Pk)
-		g.Phrase = utils.DecryptAES(g.Phrase)
+		if err := repository.ResolveCredential(context.Background(), g); err != nil {
+			return nil, err
+		}
 	}
 
 	return lo.SliceToMap(gateways, func(g *model.Gateway) (int, *model.Gateway) {

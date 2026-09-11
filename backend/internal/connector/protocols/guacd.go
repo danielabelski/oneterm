@@ -35,21 +35,27 @@ func ConnectGuacd(ctx *gin.Context, sess *gsession.Session, asset *model.Asset, 
 	permissions := &guacd.PermissionInfo{}
 
 	// Check all relevant permissions in one batch call
-	batchResult, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess,
-		model.ActionCopy,
-		model.ActionPaste,
-		model.ActionFileUpload,
-		model.ActionFileDownload)
-
-	if err != nil {
-		logger.L().Warn("Failed to check permissions, using default settings", zap.Error(err))
-		// Continue with default (denied) permissions if check fails
+	if sess.PAMAuthorization != nil {
+		initial := sess.GetPermissions()
+		permissions.AllowCopy, permissions.AllowPaste = initial.Copy, initial.Paste
+		permissions.AllowFileUpload, permissions.AllowFileDownload = initial.FileUpload, initial.FileDownload
 	} else {
-		// Extract individual permissions from batch result
-		permissions.AllowCopy = batchResult.IsAllowed(model.ActionCopy)
-		permissions.AllowPaste = batchResult.IsAllowed(model.ActionPaste)
-		permissions.AllowFileUpload = batchResult.IsAllowed(model.ActionFileUpload)
-		permissions.AllowFileDownload = batchResult.IsAllowed(model.ActionFileDownload)
+		batchResult, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess,
+			model.ActionCopy,
+			model.ActionPaste,
+			model.ActionFileUpload,
+			model.ActionFileDownload)
+
+		if err != nil {
+			logger.L().Warn("Failed to check permissions, using default settings", zap.Error(err))
+			// Continue with default (denied) permissions if check fails
+		} else {
+			// Extract individual permissions from batch result
+			permissions.AllowCopy = batchResult.IsAllowed(model.ActionCopy)
+			permissions.AllowPaste = batchResult.IsAllowed(model.ActionPaste)
+			permissions.AllowFileUpload = batchResult.IsAllowed(model.ActionFileUpload)
+			permissions.AllowFileDownload = batchResult.IsAllowed(model.ActionFileDownload)
+		}
 	}
 
 	// Clean protocol parameter - remove port number if present for guacd compatibility
@@ -64,6 +70,7 @@ func ConnectGuacd(ctx *gin.Context, sess *gsession.Session, asset *model.Asset, 
 		return
 	}
 	defer t.Close()
+	sess.SetPAMTransportClose(t.Close)
 
 	sess.ConnectionId = t.ConnectionId
 	sess.GuacdTunnel = t
@@ -83,7 +90,9 @@ func ConnectGuacd(ctx *gin.Context, sess *gsession.Session, asset *model.Asset, 
 				if len(p) <= 0 {
 					continue
 				}
-				chs.OutChan <- p
+				if !chs.SendOutput(sess.Gctx, p) {
+					return nil
+				}
 			}
 		}
 	})
@@ -93,7 +102,7 @@ func ConnectGuacd(ctx *gin.Context, sess *gsession.Session, asset *model.Asset, 
 			case <-sess.Gctx.Done():
 				return nil
 			case <-chs.AwayChan:
-				// Normal termination - return sentinel error  
+				// Normal termination - return sentinel error
 				return ErrSessionClosed
 			case in := <-chs.InChan:
 				t.Write(in)
@@ -187,7 +196,9 @@ func MonitGuacd(ctx *gin.Context, sess *gsession.Session, chs *gsession.SessionC
 				if len(p) <= 0 {
 					continue
 				}
-				chs.OutChan <- p
+				if !chs.SendOutput(gctx, p) {
+					return nil
+				}
 			}
 		}
 	})

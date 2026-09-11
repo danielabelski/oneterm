@@ -19,7 +19,7 @@ func LoggerMiddleware() gin.HandlerFunc {
 		cost := time.Since(start)
 
 		// Skip logging for web proxy requests to reduce noise
-		url := ctx.Request.URL.String()
+		url := ctx.Request.URL.Path
 		host := ctx.Request.Host
 		if strings.HasPrefix(host, "webproxy.") {
 			return

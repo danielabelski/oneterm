@@ -1,6 +1,7 @@
 package i18n
 
 import (
+	"embed"
 	"fmt"
 
 	"github.com/BurntSushi/toml"
@@ -16,19 +17,48 @@ var (
 	langs  = []string{"en", "zh"}
 )
 
+//go:embed locales/active.*.toml
+var bundledMessages embed.FS
+
 func init() {
 	Bundle.RegisterUnmarshalFunc("toml", toml.Unmarshal)
 	for _, lang := range langs {
 		_, err := Bundle.LoadMessageFile(fmt.Sprintf("./locales/active.%s.toml", lang))
 		if err != nil {
-			logger.L().Error("load i18n message failed", zap.Error(err))
+			name := fmt.Sprintf("locales/active.%s.toml", lang)
+			data, loadErr := bundledMessages.ReadFile(name)
+			if loadErr == nil {
+				_, loadErr = Bundle.ParseMessageFileBytes(data, name)
+			}
+			if loadErr != nil {
+				logger.L().Error("load i18n message failed", zap.Error(loadErr))
+			}
 		}
 	}
 }
 
 var (
 	// errors
-	MsgBadRequest = &i18n.Message{
+	MsgPAMTemplateDenied      = &i18n.Message{ID: "MsgPAMTemplateDenied", Other: "You cannot initiate this approval workflow. Ask an administrator to check the ITSM template visibility and submission-node assignees"}
+	MsgPAMExecutionState      = &i18n.Message{ID: "MsgPAMExecutionState", Other: "The password task state does not allow this operation. Review the password operation history first"}
+	MsgPAMCredentialShared    = &i18n.Message{ID: "MsgPAMCredentialShared", Other: "This account is associated with other assets. Use a dedicated account before managing a local password"}
+	MsgPAMIdentity            = &i18n.Message{ID: "MsgPAMIdentity", Other: "The application request identity is invalid"}
+	MsgPAMDenied              = &i18n.Message{ID: "MsgPAMDenied", Other: "Credential access is not permitted"}
+	MsgPAMConflict            = &i18n.Message{ID: "MsgPAMConflict", Other: "The resource name or identity is already registered"}
+	MsgPAMReplay              = &i18n.Message{ID: "MsgPAMReplay", Other: "The request evidence has expired or was already used"}
+	MsgPAMRevision            = &i18n.Message{ID: "MsgPAMRevision", Other: "The record changed. Reload before saving"}
+	MsgPAMInput               = &i18n.Message{ID: "MsgPAMInput", Other: "Check the application identity, credential targets and access settings"}
+	MsgPAMBindingChanged      = &i18n.Message{ID: "MsgPAMBindingChanged", Other: "The target route changed. Review the managed account binding before connecting"}
+	MsgPAMBindingUnavailable  = &i18n.Message{ID: "MsgPAMBindingUnavailable", Other: "The managed account or its binding is unavailable"}
+	MsgPAMApprovalRequired    = &i18n.Message{ID: "MsgPAMApprovalRequired", Other: "An approved access request is required"}
+	MsgPAMRequestState        = &i18n.Message{ID: "MsgPAMRequestState", Other: "The request changed. Reload before continuing"}
+	MsgPAMScopeChanged        = &i18n.Message{ID: "MsgPAMScopeChanged", Other: "The target, credential or access policy changed. Submit a new request"}
+	MsgPAMProviderUnavailable = &i18n.Message{ID: "MsgPAMProviderUnavailable", Other: "This operation or approval provider is not available"}
+	MsgPAMSessionEnded        = &i18n.Message{ID: "MsgPAMSessionEnded", Other: "The access authorization is no longer valid. The connection has been closed"}
+	MsgPAMSessionCapacity     = &i18n.Message{ID: "MsgPAMSessionCapacity", Other: "The account's concurrent session limit has been reached"}
+	MsgPAMSessionConflict     = &i18n.Message{ID: "MsgPAMSessionConflict", Other: "This connection identifier has already been used. Start a new connection"}
+	MsgPAMUnavailable         = &i18n.Message{ID: "MsgPAMUnavailable", Other: "Credential access is temporarily unavailable"}
+	MsgBadRequest             = &i18n.Message{
 		ID:    "MsgBadRequest",
 		One:   "Bad Request: {{.err}}",
 		Other: "Bad Request: {{.err}}",
@@ -107,6 +137,16 @@ var (
 		ID:    "MsgUnauthorized",
 		One:   "Unauthorized",
 		Other: "Unauthorized",
+	}
+	MsgMFARequired = &i18n.Message{
+		ID:    "MsgMFARequired",
+		One:   "Verify MFA again before this operation",
+		Other: "Verify MFA again before this operation",
+	}
+	MsgCredentialInput = &i18n.Message{
+		ID:    "MsgCredentialInput",
+		One:   "Provide a complete credential when replacing its value or authentication type",
+		Other: "Provide a complete credential when replacing its value or authentication type",
 	}
 	//
 	MsgInternalError = &i18n.Message{

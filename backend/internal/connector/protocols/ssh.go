@@ -51,6 +51,7 @@ func ConnectSsh(ctx *gin.Context, sess *gsession.Session, asset *model.Asset, ac
 
 	// CRITICAL: Store SSH client in session for file transfer reuse
 	sess.SetSSHClient(sshCli)
+	sess.SetPAMTransportClose(func() { sshCli.Close() })
 	logger.L().Info("SSH client stored in session for reuse", zap.String("sessionId", sess.SessionId))
 
 	sshSess, err := sshCli.NewSession()
@@ -106,7 +107,9 @@ func ConnectSsh(ctx *gin.Context, sess *gsession.Session, asset *model.Asset, ac
 				}
 				p := make([]byte, utf8.RuneLen(rn))
 				utf8.EncodeRune(p, rn)
-				chs.OutChan <- p
+				if !chs.SendOutput(sess.Gctx, p) {
+					return nil
+				}
 			}
 		}
 	})

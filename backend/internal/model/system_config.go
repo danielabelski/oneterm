@@ -27,4 +27,5 @@ func (m *SystemConfig) TableName() string {
 // System config key constants
 const (
 	SysConfigSSHPrivateKey = "ssh_private_key"
+	SysConfigPAMDataKey    = "pam_data_key_id"
 )

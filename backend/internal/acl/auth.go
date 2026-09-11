@@ -166,7 +166,8 @@ func AuthWithKey(path string, originData map[string]any) (sess *Session, err err
 		Post(url)
 	if err = remote.HandleErr(err, resp, nil); err == nil {
 		sess = &Session{
-			Uid: data.User.UID,
+			Uid:         data.User.UID,
+			authBinding: identityBinding("key", fmt.Sprint(originData["_key"])),
 			Acl: Acl{
 				Uid:         data.User.UID,
 				UserName:    data.User.Username,
