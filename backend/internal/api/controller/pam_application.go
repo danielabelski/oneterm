@@ -230,9 +230,14 @@ func (c *Controller) GetPAMAccessAudit(ctx *gin.Context) {
 		abortPAM(ctx, service.ErrPAMDenied)
 		return
 	}
+	all, err := service.PAMAuditAll(ctx, operator, service.CredentialAccessAuditPermission)
+	if err != nil {
+		abortPAM(ctx, err)
+		return
+	}
 	pamPagination(ctx)
 	query := db.GetDB().WithContext(ctx.Request.Context()).Model(&model.PAMAccessAudit{})
-	if !acl.IsAdmin(operator) {
+	if !all {
 		resources, err := acl.GetRoleResources(ctx.Request.Context(), operator.GetRid(), config.RESOURCE_PAM_APPLICATION)
 		if err != nil {
 			abortPAM(ctx, service.ErrPAMUnavailable)
