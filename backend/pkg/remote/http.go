@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -34,11 +35,13 @@ func CopyContext(ctx context.Context) context.Context {
 }
 
 func GetAclToken(ctx context.Context) (res string, err error) {
-	res, err = cache.RC.Get(ctx, "aclToken").Result()
+	aclConfig := config.Cfg.Auth.Acl
+	identity := sha256.Sum256([]byte(aclConfig.Url + "\x00" + aclConfig.AppId + "\x00" + aclConfig.SecretKey))
+	cacheKey := "aclToken:" + hex.EncodeToString(identity[:])
+	res, err = cache.RC.Get(ctx, cacheKey).Result()
 	if err == nil {
 		return
 	}
-	aclConfig := config.Cfg.Auth.Acl
 
 	url := fmt.Sprintf("%s%s", aclConfig.Url, "/acl/apps/token")
 	secretHash := md5.Sum([]byte(aclConfig.SecretKey))
@@ -55,7 +58,7 @@ func GetAclToken(ctx context.Context) (res string, err error) {
 	}
 
 	res = data["token"]
-	_, err = cache.RC.SetNX(ctx, "aclToken", res, time.Hour).Result()
+	_, err = cache.RC.SetNX(ctx, cacheKey, res, time.Hour).Result()
 	return
 }
 
