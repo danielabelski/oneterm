@@ -8,7 +8,7 @@ import (
 	"github.com/veops/oneterm/internal/acl"
 	"github.com/veops/oneterm/internal/model"
 	"github.com/veops/oneterm/internal/repository"
-	"github.com/veops/oneterm/pkg/config"
+	"github.com/veops/oneterm/pkg/db"
 	"gorm.io/gorm"
 )
 
@@ -79,34 +79,45 @@ func (s *AccountService) BuildQueryWithAuthorization(ctx *gin.Context) (*gorm.DB
 	return db, nil
 }
 
-// GetAccountCredentials gets account credentials with ACL permission check
+// GetAccountCredentials preserves basic reads and enforces configured credential policies.
 func (s *AccountService) GetAccountCredentials(ctx *gin.Context, accountId int) (*model.Account, error) {
-	currentUser, err := acl.GetSessionFromCtx(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	var account model.Account
-	baseRepo := repository.NewBaseRepository()
-	if err := baseRepo.GetById(ctx, accountId, &account); err != nil {
+	if err := repository.NewBaseRepository().GetById(ctx, accountId, &account); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrAccountNotFound
 		}
 		return nil, err
 	}
-
-	if !acl.IsAdmin(currentUser) {
-		hasPermission, err := acl.HasPermission(ctx, currentUser.GetRid(), config.RESOURCE_ACCOUNT, account.ResourceId, acl.READ)
+	// Preserve the basic reader; managed accounts and approval policies use protected retrieval.
+	if !account.Managed {
+		policy, err := repository.PasswordViewPolicy(db.GetDB().WithContext(ctx.Request.Context()))
 		if err != nil {
-			return nil, err
+			return nil, ErrPAMUnavailable
 		}
-		if !hasPermission {
-			return nil, ErrAccountForbidden
+		if !requiresPAMApproval(policy, acl.Retrieve) && len(policy.SourceCIDRs) == 0 {
+			operator, err := acl.GetSessionFromCtx(ctx)
+			if err != nil || operator == nil || operator.Uid <= 0 {
+				return nil, ErrPAMDenied
+			}
+			if !acl.IsAdmin(operator) {
+				allowed, err := pamResourcePermission(ctx.Request.Context(), operator, &account, acl.READ, false)
+				if err != nil {
+					return nil, ErrPAMUnavailable
+				}
+				if !allowed {
+					return nil, ErrPAMDenied
+				}
+			}
+			if err := repository.ResolveCredential(ctx.Request.Context(), &account); err != nil {
+				return nil, err
+			}
+			return &account, nil
 		}
 	}
-
-	if err := repository.ResolveCredential(ctx.Request.Context(), &account); err != nil {
+	credential, err := retrievePasswordView(ctx, model.PAMCredentialTarget{Kind: model.PAMOwnerAccount, ID: accountId}, false)
+	if err != nil {
 		return nil, err
 	}
+	account.SetCredentialValues(credential.Password, credential.PK, credential.Phrase)
 	return &account, nil
 }

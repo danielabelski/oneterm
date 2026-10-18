@@ -1,6 +1,6 @@
 <template>
   <a-modal
-    :visible="visible"
+    :visible="visible && !checking"
     :title="title || $t('oneterm.passwordView.requestTitle')"
     :width="720"
     :footer="null"
@@ -92,6 +92,7 @@ export default {
   data() {
     return {
       visible: false,
+      checking: false,
       loading: false,
       refreshing: false,
       failed: false,
@@ -137,12 +138,17 @@ export default {
       this.close()
       this.action = action
       this.visible = true
+      this.checking = true
+      const generation = this.generation
       const ready = await this.refresh()
+      if (generation !== this.generation || !this.visible) return false
       if (ready) this.close()
+      else this.checking = false
       return ready
     },
     close() {
       this.visible = false
+      this.checking = false
       this.generation += 1
       clearTimeout(this.timer)
       this.timer = null

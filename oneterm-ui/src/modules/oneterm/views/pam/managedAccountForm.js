@@ -22,7 +22,7 @@ export function policyPayload(form, sourceText) {
     required_approvals: Number(form.required_approvals),
     max_duration_minutes: Number(form.max_duration_minutes),
     request_expiry_minutes: Number(form.request_expiry_minutes),
-    require_approval_actions: (form.require_approval_actions || []).filter(action => action === 'connect'),
+    require_approval_actions: [...(form.require_approval_actions || [])],
     source_cidrs: [...new Set(String(sourceText || '').split(/[\s,]+/).filter(Boolean))],
     allow_applications: Boolean(form.allow_applications),
     connection_permissions: {

@@ -196,6 +196,7 @@ func (c *Controller) GetPAMTargets(ctx *gin.Context) {
 }
 
 func (c *Controller) GetPAMCapabilities(ctx *gin.Context) {
+	ctx.Header("Cache-Control", "no-store")
 	ctx.JSON(http.StatusOK, NewHttpResponseWithData(map[string]any{
 		"application_actions":        []string{acl.Retrieve},
 		"application_target_kinds":   []string{model.PAMOwnerAccount},

@@ -9,7 +9,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/spf13/cast"
 
-	"github.com/veops/oneterm/internal/acl"
 	"github.com/veops/oneterm/internal/model"
 	"github.com/veops/oneterm/internal/service"
 	"github.com/veops/oneterm/pkg/config"
@@ -166,21 +165,10 @@ func (c *Controller) writeAccountCredentials(ctx *gin.Context) {
 
 	account, err := accountService.GetAccountCredentials(ctx, accountId)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrAccountNotFound):
-			ctx.AbortWithError(http.StatusNotFound, &myErrors.ApiError{
-				Data: map[string]any{"err": "Account not found"},
-			})
-		case errors.Is(err, service.ErrAccountForbidden):
-			ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{
-				Code: myErrors.ErrNoPerm,
-				Data: map[string]any{"perm": acl.READ},
-			})
-		default:
-			ctx.AbortWithError(http.StatusInternalServerError, &myErrors.ApiError{
-				Code: myErrors.ErrInternal,
-				Data: map[string]any{"err": err.Error()},
-			})
+		if errors.Is(err, service.ErrAccountNotFound) {
+			ctx.AbortWithStatus(http.StatusNotFound)
+		} else {
+			abortPAM(ctx, err)
 		}
 		return
 	}

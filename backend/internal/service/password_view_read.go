@@ -53,8 +53,12 @@ func loadPasswordViewRights(ctx context.Context, operator *acl.Session, owner mo
 	return rights, err
 }
 
-// This endpoint admits request-only users; legacy, machine and connection readers are unchanged.
-func RetrievePasswordView(ctx *gin.Context, target model.PAMCredentialTarget) (response *PAMCredentialResponse, err error) {
+// Human readers share one policy; application and connection readers have separate admission checks.
+func RetrievePasswordView(ctx *gin.Context, target model.PAMCredentialTarget) (*PAMCredentialResponse, error) {
+	return retrievePasswordView(ctx, target, true)
+}
+
+func retrievePasswordView(ctx *gin.Context, target model.PAMCredentialTarget, allowRequest bool) (response *PAMCredentialResponse, err error) {
 	operator, err := acl.GetSessionFromCtx(ctx)
 	if err != nil || operator.Uid <= 0 {
 		return nil, ErrPAMDenied
@@ -81,7 +85,7 @@ func RetrievePasswordView(ctx *gin.Context, target model.PAMCredentialTarget) (r
 	if err != nil {
 		return nil, ErrPAMUnavailable
 	}
-	if !rights.Admin && !rights.Direct && !rights.Request {
+	if !rights.Admin && !rights.Direct && (!allowRequest || !rights.Request) {
 		return nil, ErrPAMDenied
 	}
 	if !acl.VerifyMFAToken(requestCtx, operator, ctx.GetHeader("X-MFA-Token"), acl.PAMMFARetrieve) {

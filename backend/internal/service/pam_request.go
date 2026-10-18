@@ -231,6 +231,9 @@ func (s *PAMRequestService) Create(ctx *gin.Context, input PAMRequestInput) (*mo
 }
 
 func requestScopeCurrent(ctx context.Context, tx *gorm.DB, request *model.PAMAccessRequest, owner model.CredentialOwner, policy *model.PAMPolicy) bool {
+	if request.Action != "connect" && request.Action != acl.Retrieve {
+		return false
+	}
 	if request.PolicyID != policy.Id || request.PolicyRevision != policy.Revision {
 		return false
 	}

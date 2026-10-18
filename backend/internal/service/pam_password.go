@@ -438,6 +438,9 @@ func StartPAMPasswordChange(ctx *gin.Context, accountID int, input PAMPasswordIn
 	if err := target.validate(); err != nil {
 		return nil, err
 	}
+	if target.account.AccountType != model.AUTHMETHOD_PASSWORD {
+		return nil, ErrPAMProviderUnavailable
+	}
 	if input.Action == acl.RecoverSecret && (target.config.ExecutorAccountID == 0 || target.config.ExecutorAccountID == accountID) {
 		return nil, ErrPAMInput
 	}
