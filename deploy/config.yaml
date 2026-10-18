@@ -3,6 +3,8 @@ mode: debug
 http:
   host: 0.0.0.0
   port: 8888
+  # Set only the addresses/CIDRs of your reverse proxies before using source-IP policies.
+  trustedProxies: []
 
 ssh:
   host: 0.0.0.0

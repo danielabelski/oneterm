@@ -167,6 +167,7 @@ import { getPreference } from '@/modules/oneterm/api/preference.js'
 import { getAccountList } from '@/modules/oneterm/api/account'
 import { getConfig } from '@/modules/oneterm/api/config'
 import { getAssetPermissions, getAssetList } from '@/modules/oneterm/api/asset'
+import { connectionPermissions } from '@/modules/oneterm/utils/permissions'
 import { startWebProxy } from '@/modules/oneterm/api/webProxy'
 import { defaultPreferenceSetting } from '../systemSettings/terminalDisplay/constants.js'
 import { WORKSTATION_TAB_TYPE, SOCKET_STATUS } from './constants.js'
@@ -351,22 +352,17 @@ export default {
     },
 
     async getAssetPermissions(assetId, account_ids) {
-      const defaultPermissions = this.controlConfig?.default_permissions
-      const permissions = {}
+      const ids = [...new Set(String(account_ids).split(',').map(Number).filter(id => id > 0))]
+      const permissions = Object.fromEntries(ids.map(id => [id, connectionPermissions()]))
 
       try {
         const res = await getAssetPermissions(assetId, { account_ids })
         const data = res?.data?.results || {}
-        Object.keys(data).forEach((accountId) => {
-          const permissionData = data?.[accountId]?.results || {}
-          permissions[accountId] = {}
-          Object.keys(defaultPermissions).forEach((permissionType) => {
-            permissions[accountId][permissionType] =
-              permissionData?.[permissionType]?.allowed ?? defaultPermissions?.[permissionType] ?? false
-          })
+        ids.forEach((accountId) => {
+          permissions[accountId] = connectionPermissions(data[accountId]?.results)
         })
       } catch (error) {
-        console.error('getAssetPermissions error', error)
+        this.$message.error(this.$t('oneterm.failedToLoadPermissions'))
       }
       return permissions
     },

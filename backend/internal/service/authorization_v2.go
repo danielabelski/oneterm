@@ -19,6 +19,7 @@ import (
 	"github.com/veops/oneterm/internal/acl"
 	"github.com/veops/oneterm/internal/model"
 	"github.com/veops/oneterm/internal/repository"
+	gsession "github.com/veops/oneterm/internal/session"
 	"github.com/veops/oneterm/pkg/config"
 	dbpkg "github.com/veops/oneterm/pkg/db"
 	"github.com/veops/oneterm/pkg/logger"
@@ -550,80 +551,13 @@ func (s *AuthorizationV2Service) getClientIP(ctx *gin.Context) string {
 
 // GetAssetPermissions returns all permissions for a user on a specific asset
 func (s *AuthorizationV2Service) GetAssetPermissions(ctx *gin.Context, assetId int, accountId int) (*model.BatchAuthResult, error) {
-	currentUser, _ := acl.GetSessionFromCtx(ctx)
-
-	// Helper function to create batch result for all actions
-	allActions := []model.AuthAction{
-		model.ActionConnect,
-		model.ActionFileUpload,
-		model.ActionFileDownload,
-		model.ActionCopy,
-		model.ActionPaste,
-		model.ActionShare,
+	if DefaultAuthService == nil || assetId <= 0 || accountId <= 0 {
+		return nil, ErrPAMUnavailable
 	}
-
-	createBatchResult := func(allowed bool, reason string, permissions *model.AuthPermissions) *model.BatchAuthResult {
-		results := make(map[model.AuthAction]*model.AuthResult)
-		for _, action := range allActions {
-			result := &model.AuthResult{
-				Allowed: allowed,
-				Reason:  reason,
-			}
-			// Only set permissions if they are provided
-			if permissions != nil {
-				result.Permissions = *permissions
-			}
-			results[action] = result
-		}
-		return &model.BatchAuthResult{
-			Results: results,
-		}
-	}
-
-	// Administrators have access to all resources
-	if acl.IsAdmin(currentUser) {
-		// For administrators, permissions reflect their actual capabilities
-		adminPermissions := &model.AuthPermissions{
-			Connect:      true,
-			FileUpload:   true,
-			FileDownload: true,
-			Copy:         true,
-			Paste:        true,
-			Share:        true,
-		}
-		return createBatchResult(true, "Administrator access", adminPermissions), nil
-	}
-
-	// Get the asset information
-	asset, err := s.getAssetById(ctx, assetId)
-	if err != nil {
-		return createBatchResult(false, "Asset not found", nil), err
-	}
-
-	// Get user's authorized V2 rule IDs from ACL
-	authV2ResourceIds, err := s.getAuthorizedV2ResourceIds(ctx)
-	if err != nil {
-		return createBatchResult(false, "Failed to get authorized rules", nil), err
-	}
-
-	if len(authV2ResourceIds) == 0 {
-		return createBatchResult(false, "No authorization rules available", nil), nil
-	}
-
-	// Create batch authorization request for all actions
-	clientIP := s.getClientIP(ctx)
-	batchReq := &model.BatchAuthRequest{
-		UserId:    currentUser.GetUid(),
-		NodeId:    asset.ParentId,
-		AssetId:   assetId,
-		AccountId: accountId,
-		Actions:   allActions,
-		ClientIP:  clientIP,
-		Timestamp: time.Now(),
-	}
-
-	// Use V2 matcher with filtered rule scope
-	return s.matcher.MatchBatchWithScope(ctx, batchReq, authV2ResourceIds)
+	return DefaultAuthService.HasAuthorizationV2(ctx, &gsession.Session{Session: &model.Session{
+		AssetId: assetId, AccountId: accountId,
+	}}, model.ActionConnect, model.ActionFileUpload, model.ActionFileDownload,
+		model.ActionCopy, model.ActionPaste, model.ActionShare)
 }
 
 // getAssetById retrieves asset by ID from cache
