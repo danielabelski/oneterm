@@ -204,7 +204,7 @@ export default {
             parent_id: parent_id ?? 0,
             protocols,
             web_config,
-            gateway_id,
+            gateway_id: gateway_id ?? 0,
             authorization,
             access_time_control: {
               time_ranges,
