@@ -2,6 +2,7 @@ package session
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -109,14 +110,21 @@ func (a *Asciinema) Resize(w, h int) {
 }
 
 // Close closes the recording and saves to storage
-func (a *Asciinema) Close() error {
+func (a *Asciinema) Close() (err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed {
 		return a.err
 	}
 	a.closed = true
-	defer a.file.Close()
+	defer func() {
+		if closeErr := a.file.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			a.err = err
+		}
+	}()
 	if a.err != nil {
 		return a.err
 	}
@@ -150,9 +158,19 @@ func (a *Asciinema) Close() error {
 
 // GetReplay gets replay file
 func GetReplay(sessionID string) (io.ReadCloser, error) {
+	return GetReplayContext(context.Background(), sessionID)
+}
+
+func GetReplayContext(ctx context.Context, sessionID string) (io.ReadCloser, error) {
+	if sessionID == "" || filepath.Base(sessionID) != sessionID || strings.ContainsAny(sessionID, "/\\\x00") {
+		return nil, fmt.Errorf("invalid recording id")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Try to get from storage first
 	if storage.DefaultSessionReplayAdapter != nil {
-		reader, err := storage.DefaultSessionReplayAdapter.GetReplay(sessionID)
+		reader, err := storage.DefaultSessionReplayAdapter.GetReplayContext(ctx, sessionID)
 		if err == nil {
 			return reader, nil
 		}
@@ -185,6 +203,9 @@ func GetReplay(sessionID string) (io.ReadCloser, error) {
 
 	// Search in date directories (newest first)
 	for i := len(entries) - 1; i >= 0; i-- {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		entry := entries[i]
 		if entry.IsDir() {
 			// Check if directory name looks like a date (YYYY-MM-DD)

@@ -91,7 +91,7 @@ module.exports = {
   productionSourceMap: false,
   lintOnSave: undefined,
   // babel-loader no-ignore node_modules/*
-  transpileDependencies: []
+  transpileDependencies: ['asciinema-player']
 }
 
 function getAntdSerials(color) {

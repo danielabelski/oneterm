@@ -44,11 +44,13 @@ func (a *SessionReplayAdapter) SaveReplay(sessionID string, reader io.Reader, si
 
 // GetReplay retrieves a session replay
 func (a *SessionReplayAdapter) GetReplay(sessionID string) (io.ReadCloser, error) {
+	return a.GetReplayContext(context.Background(), sessionID)
+}
+
+func (a *SessionReplayAdapter) GetReplayContext(ctx context.Context, sessionID string) (io.ReadCloser, error) {
 	if a.provider == nil {
 		return nil, nil // No storage provider available
 	}
-
-	ctx := context.Background()
 
 	// Try with current date first (most recent)
 	key := a.generateReplayKey(sessionID, time.Now())

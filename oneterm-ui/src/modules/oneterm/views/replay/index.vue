@@ -13,6 +13,7 @@ export default {
   data() {
     return {
       player: null,
+      alive: true,
     }
   },
   computed: {
@@ -22,11 +23,9 @@ export default {
     }),
   },
   async mounted() {
-    console.log(this.$route)
     const { session_id } = this.$route.params
     const res = await getSessionReplayData(session_id)
-    const regexp = /\{(?:[^{}]*|\{.*?\})*\}/
-    const resConfig = res.match(regexp)
+    if (!this.alive) return
 
     const config = {
       markers: [
@@ -40,17 +39,16 @@ export default {
       terminalFontFamily: 'monaco, Consolas, "Lucida Console", monospace',
     }
 
-    if (resConfig?.[0]) {
-      const data = JSON.parse(resConfig?.[0])
-      config.cols = data.width
-      config.rows = data.height
-    }
-
     this.player = AsciinemaPlayer.create(
       { data: res },
-      document.getElementById('oneterm-replay'),
+      this.$el,
       config
     )
+  },
+  beforeDestroy() {
+    this.alive = false
+    if (this.player) this.player.dispose()
+    this.player = null
   },
 }
 </script>
