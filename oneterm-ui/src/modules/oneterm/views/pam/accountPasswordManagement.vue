@@ -55,9 +55,6 @@
                 :saving="Boolean(pending)"
                 @save="savePolicy" />
             </a-tab-pane>
-            <a-tab-pane v-if="passwordPlatform" key="password" :tab="$t('oneterm.pam.password.title')">
-              <PasswordOperations v-if="detailTab === 'password'" :account="account" :capabilities="capabilities" :is-admin="isAdmin" @updated="inspect(account.id, true)" />
-            </a-tab-pane>
           </a-tabs>
         </template>
       </a-spin>
@@ -87,11 +84,10 @@ import ManagedAccountEditor from './managedAccountEditor.vue'
 import PolicyEditor from './policyEditor.vue'
 import MFAModal from '@/views/mfa/mfaModal'
 import GrantModal from '@/modules/oneterm/components/grant/grantModal.vue'
-import PasswordOperations from './passwordOperations.vue'
 
 export default {
   name: 'AccountPasswordManagement',
-  components: { ManagedAccountEditor, PolicyEditor, MFAModal, GrantModal, PasswordOperations },
+  components: { ManagedAccountEditor, PolicyEditor, MFAModal, GrantModal },
   data() {
     return { visible: false,
       capabilities: null,
@@ -113,7 +109,6 @@ export default {
       credentialText: '' }
   },
   computed: {
-    passwordPlatform() { return (this.capabilities?.managed_account_platforms || []).some((item) => item.id === this.account?.platform && (item.operations || []).includes('verify_secret')) },
     ...mapState({ windowHeight: (state) => state.windowHeight, roles: (state) => state.user.roles }),
     tableHeight() { return Math.max(220, this.windowHeight - 240) },
     isAdmin() { return (this.roles?.permissions || []).some((role) => ['admin', 'oneterm_admin', 'acl_admin'].includes(role)) }

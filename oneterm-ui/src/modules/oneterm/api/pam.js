@@ -10,34 +10,6 @@ export const getPasswordViewAudit = (params) => axios({ url: `${prefix}/password
 export const getPAMCapabilities = () => axios({ url: `${prefix}/capabilities`, method: 'get' })
 export const getPAMAccount = (id) => axios({ url: `${prefix}/accounts/${id}`, method: 'get' })
 export const getPAMAccountBindings = (id, params) => axios({ url: `${prefix}/accounts/${id}/bindings`, method: 'get', params })
-export const getPAMPasswordExecutors = (id, params) => axios({ url: `${prefix}/accounts/${id}/password/executors`, method: 'get', params })
-export const getPAMPasswordExecutions = (id, params) => axios({ url: `${prefix}/accounts/${id}/password/executions`, method: 'get', params })
-export const savePAMPasswordConfig = (id, bindingId, data, token) => axios({
-  url: `${prefix}/accounts/${id}/bindings/${bindingId}/password`,
-  method: 'put',
-  data,
-  headers: { 'X-MFA-Token': token },
-  isShowMessage: false
-})
-export const verifyPAMPassword = (id, data) => axios({
-  url: `${prefix}/accounts/${id}/password/verify`, method: 'post', data, timeout: 45000, isShowMessage: false
-})
-export const startPAMPasswordChange = (id, data, token) => axios({
-  url: `${prefix}/accounts/${id}/password/executions`,
-  method: 'post',
-  data,
-  timeout: 95000,
-  headers: { 'X-MFA-Token': token },
-  isShowMessage: false
-})
-export const continuePAMPassword = (id, executionId, operation, token, data) => axios({
-  url: `${prefix}/accounts/${id}/password/executions/${executionId}/${operation}`,
-  method: 'post',
-  data,
-  timeout: 95000,
-  headers: { 'X-MFA-Token': token },
-  isShowMessage: false
-})
 export const getPAMAdoptionAssets = (params) => axios({ url: `${prefix}/adoption/assets`, method: 'get', params })
 export const getPAMPolicy = (id) => axios({ url: `${prefix}/policies/account/${id}`, method: 'get' })
 export const adoptPAMAccount = (data, token) => axios({ url: `${prefix}/accounts/adopt`, method: 'post', data, headers: { 'X-MFA-Token': token }, isShowMessage: false })

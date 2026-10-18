@@ -60,7 +60,7 @@ type PAMAssetAccountBinding struct {
 	TargetHost     string           `gorm:"size:512" json:"target_host"`
 	GatewayID      int              `gorm:"not null;default:0" json:"gateway_id"`
 	Protocols      Slice[string]    `gorm:"type:json" json:"protocols"`
-	PasswordConfig Map[string, any] `gorm:"type:json" json:"password_config"`
+	PasswordConfig Map[string, any] `gorm:"type:json" json:"-"`
 	CreatorID      int              `json:"creator_id"`
 	UpdaterID      int              `json:"updater_id"`
 	AuthorityKind  string           `gorm:"size:24;not null;default:legacy_shared" json:"authority_kind"`

@@ -19,6 +19,7 @@ import (
 )
 
 var (
+	ErrPAMExecutionState     = errors.New("PAM execution state or ownership changed")
 	ErrPAMBindingUnavailable = &apiErrors.ApiError{Code: apiErrors.ErrPAMBindingUnavailable}
 	ErrPAMBindingChanged     = &apiErrors.ApiError{Code: apiErrors.ErrPAMBindingChanged}
 )

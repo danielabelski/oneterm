@@ -1,7 +1,6 @@
 package service
 
 import (
-	"github.com/veops/oneterm/internal/acl"
 	"github.com/veops/oneterm/internal/model"
 )
 
@@ -14,11 +13,10 @@ type PAMPlatformDefinition struct {
 	Operations         []string `json:"operations"`
 }
 
-// Operations are enabled only when their executor is registered and verified.
 var pamPlatformDefinitions = []PAMPlatformDefinition{
 	{ID: "manual", Operations: []string{}},
-	{ID: "linux_local", Protocol: "ssh", LocalAuthorityOnly: true, Operations: []string{acl.VerifySecret, acl.RotateSecret, acl.RecoverSecret}},
-	{ID: "mysql", Protocol: "mysql", PasswordOnly: true, RequiresQualifier: true, Operations: []string{acl.VerifySecret, acl.RotateSecret, acl.RecoverSecret}},
+	{ID: "linux_local", Protocol: "ssh", LocalAuthorityOnly: true, Operations: []string{}},
+	{ID: "mysql", Protocol: "mysql", PasswordOnly: true, RequiresQualifier: true, Operations: []string{}},
 }
 
 func PAMPlatforms() []PAMPlatformDefinition {
