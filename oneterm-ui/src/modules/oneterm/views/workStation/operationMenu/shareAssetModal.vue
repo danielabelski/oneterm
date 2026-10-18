@@ -27,6 +27,15 @@
       :label-col="{ span: 5 }"
       :wrapper-col="{ span: 19 }"
     >
+      <a-form-model-item :label="$t('oneterm.assetList.shareAccess')">
+        <a-radio-group v-model="form.requireLogin">
+          <a-radio :value="true">{{ $t('oneterm.assetList.shareAuthenticated') }}</a-radio>
+          <a-radio :value="false">{{ $t('oneterm.assetList.shareAnonymous') }}</a-radio>
+        </a-radio-group>
+        <div class="temp-link-access-hint">
+          {{ $t(form.requireLogin ? 'oneterm.assetList.shareAuthenticatedHint' : 'oneterm.assetList.shareAnonymousHint') }}
+        </div>
+      </a-form-model-item>
       <a-form-model-item :label="$t(`oneterm.assetList.validTime`)" prop="validTime">
         <a-range-picker
           v-model="form.validTime"
@@ -74,10 +83,12 @@ export default {
     return {
       visible: false,
       confirmLoading: false,
+      requestId: 0,
       linkText: '',
       form: {
         validTime: [moment(), moment().add(1, 'day')],
         times: 1,
+        requireLogin: true,
         timesRadio: 'fixed'
       },
       rules: {
@@ -98,10 +109,14 @@ export default {
   },
   methods: {
     open() {
+      this.requestId += 1
+      this.linkText = ''
+      this.confirmLoading = false
       this.visible = true
       this.form = {
         validTime: [moment(), moment().add(1, 'day')],
         times: 1,
+        requireLogin: true,
         timesRadio: 'fixed'
       }
     },
@@ -112,6 +127,7 @@ export default {
         })
     },
     handleCancel() {
+      this.requestId += 1
       this.confirmLoading = false
       this.linkText = ''
       this.visible = false
@@ -121,11 +137,13 @@ export default {
         this.handleCancel()
         return
       }
+      if (this.confirmLoading) return
 
       this.$refs.createTempLinkForm.validate(async (valid) => {
-        if (!valid) {
+        if (!valid || !this.visible) {
           return
         }
+        const requestId = ++this.requestId
         this.confirmLoading = true
         const start = this.form.validTime[0].format()
         const end = this.form.validTime[1].format()
@@ -140,17 +158,23 @@ export default {
             start,
             end,
             times,
-            no_limit: this.form.timesRadio === 'any'
+            no_limit: this.form.timesRadio === 'any',
+            require_login: this.form.requireLogin
           }
         ]
 
-        const res = await postShareLink(params)
-        const shareId = res?.list?.[0]
-        if (shareId) {
-          this.$message.success(this.$t('createSuccess'))
-          this.linkText = `${document.location.origin}/oneterm/share/${protocol}/${shareId}`
+        try {
+          const res = await postShareLink(params)
+          const shareId = res?.list?.[0]
+          if (shareId && requestId === this.requestId && this.visible) {
+            this.$message.success(this.$t('createSuccess'))
+            this.linkText = `${document.location.origin}/oneterm/share/${protocol}/${shareId}`
+          }
+        } catch (error) {
+          if (requestId === this.requestId) this.$message.error(this.$t('oneterm.assetList.shareCreateFailed'))
+        } finally {
+          if (requestId === this.requestId) this.confirmLoading = false
         }
-        this.confirmLoading = false
       })
     }
   }
@@ -158,6 +182,12 @@ export default {
 </script>
 
 <style lang="less" scoped>
+.temp-link-access-hint {
+  color: #606266;
+  font-size: 12px;
+  line-height: 20px;
+}
+
 .temp-link-content {
   display: flex;
 

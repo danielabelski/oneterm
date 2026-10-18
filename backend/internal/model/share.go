@@ -11,15 +11,16 @@ const (
 )
 
 type Share struct {
-	Id        int       `json:"id" gorm:"column:id;primarykey;autoIncrement"`
-	Uuid      string    `json:"uuid" gorm:"column:uuid;uniqueIndex:uuid;size:128"`
-	AssetId   int       `json:"asset_id" gorm:"column:asset_id"`
-	AccountId int       `json:"account_id" gorm:"column:account_id"`
-	Protocol  string    `json:"protocol" gorm:"column:protocol"`
-	NoLimit   bool      `json:"no_limit" gorm:"column:no_limit"`
-	Times     int       `json:"times" gorm:"column:times"`
-	Start     time.Time `json:"start" gorm:"column:start"`
-	End       time.Time `json:"end" gorm:"column:end"`
+	Id           int       `json:"id" gorm:"column:id;primarykey;autoIncrement"`
+	Uuid         string    `json:"uuid" gorm:"column:uuid;uniqueIndex:uuid;size:128"`
+	AssetId      int       `json:"asset_id" gorm:"column:asset_id"`
+	AccountId    int       `json:"account_id" gorm:"column:account_id"`
+	Protocol     string    `json:"protocol" gorm:"column:protocol"`
+	RequireLogin bool      `json:"require_login" gorm:"not null;default:false"`
+	NoLimit      bool      `json:"no_limit" gorm:"column:no_limit"`
+	Times        int       `json:"times" gorm:"column:times"`
+	Start        time.Time `json:"start" gorm:"column:start"`
+	End          time.Time `json:"end" gorm:"column:end"`
 
 	CreatorId int                   `json:"creator_id" gorm:"column:creator_id"`
 	UpdaterId int                   `json:"updater_id" gorm:"column:updater_id"`
@@ -53,4 +54,4 @@ func (m *Share) GetId() int {
 	return m.Id
 }
 
-func (m *Share) SetPerms(perms []string){}
+func (m *Share) SetPerms(perms []string) {}

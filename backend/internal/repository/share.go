@@ -8,6 +8,7 @@ import (
 	"github.com/veops/oneterm/internal/model"
 	dbpkg "github.com/veops/oneterm/pkg/db"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ShareRepository defines the interface for share repository
@@ -29,7 +30,7 @@ func NewShareRepository() ShareRepository {
 // GetShareByID retrieves a share by ID
 func (r *shareRepository) GetShareByID(ctx context.Context, id int) (*model.Share, error) {
 	share := &model.Share{}
-	if err := dbpkg.DB.Model(share).Where("id=?", id).First(share).Error; err != nil {
+	if err := dbpkg.DB.WithContext(ctx).Model(share).Where("id=?", id).First(share).Error; err != nil {
 		return nil, err
 	}
 	return share, nil
@@ -38,7 +39,7 @@ func (r *shareRepository) GetShareByID(ctx context.Context, id int) (*model.Shar
 // GetShareByUUID retrieves a share by UUID
 func (r *shareRepository) GetShareByUUID(ctx context.Context, uuid string) (*model.Share, error) {
 	share := &model.Share{}
-	if err := dbpkg.DB.Where("uuid=?", uuid).First(share).Error; err != nil {
+	if err := dbpkg.DB.WithContext(ctx).Where("uuid=?", uuid).First(share).Error; err != nil {
 		return nil, err
 	}
 	return share, nil
@@ -46,7 +47,7 @@ func (r *shareRepository) GetShareByUUID(ctx context.Context, uuid string) (*mod
 
 // CreateShares creates new shares
 func (r *shareRepository) CreateShares(ctx context.Context, shares []*model.Share) error {
-	return dbpkg.DB.Create(&shares).Error
+	return dbpkg.DB.WithContext(ctx).Create(&shares).Error
 }
 
 // BuildQuery constructs a query for shares with filters
@@ -92,6 +93,11 @@ func (r *shareRepository) BuildQuery(ctx *gin.Context, assetIds, accountIds []in
 
 // DecrementShareTimes decrements the times field for a share
 func (r *shareRepository) DecrementShareTimes(ctx context.Context, uuid string) (int64, error) {
-	db := dbpkg.DB.Model(&model.Share{}).Where("uuid=? AND times>0", uuid).Update("times", gorm.Expr("times-?", 1))
+	now := time.Now()
+	db := dbpkg.DB.WithContext(ctx).Model(&model.Share{}).
+		Where("uuid=? AND times>0", uuid).
+		Where(clause.Lte{Column: clause.Column{Name: "start"}, Value: now}).
+		Where(clause.Gt{Column: clause.Column{Name: "end"}, Value: now}).
+		Update("times", gorm.Expr("times-?", 1))
 	return db.RowsAffected, db.Error
 }

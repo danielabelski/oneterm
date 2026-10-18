@@ -190,20 +190,21 @@ func DoConnect(ctx *gin.Context, ws *websocket.Conn) (sess *gsession.Session, er
 	sess.Ws = ws
 	sess.BinaryOutput = ctx.Query("binary") == "true"
 	sess.Session = &model.Session{
-		SessionType: ctx.GetInt("sessionType"),
-		SessionId:   sessionId,
-		Uid:         currentUser.GetUid(),
-		UserName:    currentUser.GetUserName(),
-		AssetId:     assetId,
-		Asset:       asset,
-		AssetInfo:   fmt.Sprintf("%s(%s)", asset.Name, asset.Ip),
-		AccountId:   accountId,
-		AccountInfo: fmt.Sprintf("%s(%s)", account.Name, account.Account),
-		GatewayId:   asset.GatewayId,
-		GatewayInfo: lo.Ternary(asset.GatewayId == 0, "", fmt.Sprintf("%s(%s)", gateway.Name, gateway.Host)),
-		Protocol:    ctx.Param("protocol"),
-		Status:      model.SESSIONSTATUS_ONLINE,
-		ShareId:     cast.ToInt(ctx.Value("shareId")),
+		SessionType:    ctx.GetInt("sessionType"),
+		SessionId:      sessionId,
+		Uid:            currentUser.GetUid(),
+		UserName:       currentUser.GetUserName(),
+		AssetId:        assetId,
+		Asset:          asset,
+		AssetInfo:      fmt.Sprintf("%s(%s)", asset.Name, asset.Ip),
+		AccountId:      accountId,
+		AccountInfo:    fmt.Sprintf("%s(%s)", account.Name, account.Account),
+		GatewayId:      asset.GatewayId,
+		GatewayInfo:    lo.Ternary(asset.GatewayId == 0, "", fmt.Sprintf("%s(%s)", gateway.Name, gateway.Host)),
+		Protocol:       ctx.Param("protocol"),
+		Status:         model.SESSIONSTATUS_ONLINE,
+		ShareId:        cast.ToInt(ctx.Value("shareId")),
+		ShareCreatorId: ctx.GetInt("shareCreatorId"),
 	}
 	if sess.ShareId != 0 {
 		sess.ShareEnd, _ = ctx.Value("shareEnd").(time.Time)

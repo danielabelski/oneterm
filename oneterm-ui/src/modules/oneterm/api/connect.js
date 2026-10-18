@@ -33,3 +33,10 @@ export function getShareLink(params) {
     params
   })
 }
+
+export function getShareConnectionInfo(uuid) {
+  return axios({
+    url: `/oneterm/v1/share/info/${encodeURIComponent(uuid)}`,
+    method: 'get'
+  })
+}

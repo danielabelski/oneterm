@@ -22,24 +22,25 @@ const (
 )
 
 type Session struct {
-	Id          int        `json:"id" gorm:"column:id;primarykey;autoIncrement"`
-	SessionType int        `json:"session_type" gorm:"column:session_type"`
-	SessionId   string     `json:"session_id" gorm:"column:session_id;uniqueIndex:session_id;size:128"`
-	Uid         int        `json:"uid" gorm:"column:uid;index:idx_session_uid_status,priority:1"`
-	UserName    string     `json:"user_name" gorm:"column:user_name"`
-	AssetId     int        `json:"asset_id" gorm:"column:asset_id"`
-	Asset       *Asset     `json:"-" gorm:"-"`
-	AssetInfo   string     `json:"asset_info" gorm:"column:asset_info"`
-	AccountId   int        `json:"account_id" gorm:"column:account_id"`
-	AccountInfo string     `json:"account_info" gorm:"column:account_info"`
-	GatewayId   int        `json:"gateway_id" gorm:"column:gateway_id"`
-	GatewayInfo string     `json:"gateway_info" gorm:"column:gateway_info"`
-	ClientIp    string     `json:"client_ip" gorm:"column:client_ip"`
-	Protocol    string     `json:"protocol" gorm:"column:protocol"`
-	Status      int        `json:"status" gorm:"column:status;index:idx_session_uid_status,priority:2;index:idx_session_status"`
-	Duration    int64      `json:"duration" gorm:"-"`
-	ClosedAt    *time.Time `json:"closed_at" gorm:"column:closed_at"`
-	ShareId     int        `json:"share_id" gorm:"column:share_id"`
+	Id             int        `json:"id" gorm:"column:id;primarykey;autoIncrement"`
+	SessionType    int        `json:"session_type" gorm:"column:session_type"`
+	SessionId      string     `json:"session_id" gorm:"column:session_id;uniqueIndex:session_id;size:128"`
+	Uid            int        `json:"uid" gorm:"column:uid;index:idx_session_uid_status,priority:1"`
+	UserName       string     `json:"user_name" gorm:"column:user_name"`
+	AssetId        int        `json:"asset_id" gorm:"column:asset_id"`
+	Asset          *Asset     `json:"-" gorm:"-"`
+	AssetInfo      string     `json:"asset_info" gorm:"column:asset_info"`
+	AccountId      int        `json:"account_id" gorm:"column:account_id"`
+	AccountInfo    string     `json:"account_info" gorm:"column:account_info"`
+	GatewayId      int        `json:"gateway_id" gorm:"column:gateway_id"`
+	GatewayInfo    string     `json:"gateway_info" gorm:"column:gateway_info"`
+	ClientIp       string     `json:"client_ip" gorm:"column:client_ip"`
+	Protocol       string     `json:"protocol" gorm:"column:protocol"`
+	Status         int        `json:"status" gorm:"column:status;index:idx_session_uid_status,priority:2;index:idx_session_status"`
+	Duration       int64      `json:"duration" gorm:"-"`
+	ClosedAt       *time.Time `json:"closed_at" gorm:"column:closed_at"`
+	ShareId        int        `json:"share_id" gorm:"column:share_id"`
+	ShareCreatorId int        `json:"share_creator_id" gorm:"not null;default:0"`
 
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at"`

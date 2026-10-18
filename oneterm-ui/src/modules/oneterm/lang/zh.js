@@ -353,6 +353,7 @@ const oneterm_zh = {
     assetShare: '资产分享'
   },
   sessionTable: {
+    anonymousUser: '匿名访问者',
     target: '目标',
     clientIp: '登录地址',
     cmdCount: '命令数量',
@@ -422,6 +423,13 @@ const oneterm_zh = {
     createTempLink: '创建临时连接',
     tempLinkList: '临时连接列表',
     tempLink: '临时连接',
+    shareAccess: '访问方式',
+    shareAuthenticated: '登录后访问',
+    shareAnonymous: '匿名访问',
+    shareAuthenticatedHint: '接收人先登录，操作记录关联实际访问者。',
+    shareAnonymousHint: '持有链接即可访问，审计只能记录来源地址，无法确认实际使用者。',
+    shareUnavailable: '链接已失效或使用次数已用完',
+    shareCreateFailed: '创建链接失败，请重试',
     account: '账号',
     validTime: '有效期',
     times: '次数',

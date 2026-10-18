@@ -354,6 +354,7 @@ const oneterm_en = {
     assetShare: 'Asset Share'
   },
   sessionTable: {
+    anonymousUser: 'Anonymous visitor',
     target: 'Target',
     clientIp: 'Client IP',
     cmdCount: 'Command Count',
@@ -422,6 +423,13 @@ const oneterm_en = {
     protocolPlaceholder: 'Port (default: 22)',
     createTempLink: 'Create Temporary Link',
     tempLink: 'Temporary Link',
+    shareAccess: 'Access mode',
+    shareAuthenticated: 'Require login',
+    shareAnonymous: 'Allow anonymous access',
+    shareAuthenticatedHint: 'Recipients sign in first. Session records identify the actual visitor.',
+    shareAnonymousHint: 'Anyone with the link can connect. Audit records include the source address, but cannot identify the visitor.',
+    shareUnavailable: 'This link has expired or has no remaining uses',
+    shareCreateFailed: 'Could not create the link. Try again.',
     tempLinkList: 'Temporary Link List',
     account: 'Account',
     validTime: 'Valid Time',

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/veops/oneterm/internal/model"
 	"github.com/veops/oneterm/internal/repository"
 )
+
+var ErrShareLoginRequired = errors.New("share login required")
 
 // ShareService handles share business logic
 type ShareService struct {
@@ -89,14 +92,15 @@ func (s *ShareService) GetShareByUUID(ctx context.Context, uuid string) (*model.
 
 // ValidateShareForConnection validates a share for connection
 func (s *ShareService) ValidateShareForConnection(ctx context.Context, uuid string) (*model.Share, error) {
-	share, err := s.repo.GetShareByUUID(ctx, uuid)
+	share, err := s.GetAvailableShare(ctx, uuid)
 	if err != nil {
 		return nil, err
 	}
-
-	now := time.Now()
-	if now.Before(share.Start) || now.After(share.End) {
-		return nil, fmt.Errorf("share expired or not started")
+	if share.RequireLogin {
+		operator, err := acl.GetSessionFromCtx(ctx)
+		if err != nil || operator == nil || operator.GetUid() <= 0 {
+			return nil, ErrShareLoginRequired
+		}
 	}
 
 	if share.NoLimit {
@@ -115,6 +119,18 @@ func (s *ShareService) ValidateShareForConnection(ctx context.Context, uuid stri
 	return share, nil
 }
 
+func (s *ShareService) GetAvailableShare(ctx context.Context, uuid string) (*model.Share, error) {
+	share, err := s.repo.GetShareByUUID(ctx, uuid)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	if now.Before(share.Start) || !now.Before(share.End) || (!share.NoLimit && share.Times <= 0) {
+		return nil, fmt.Errorf("share unavailable")
+	}
+	return share, nil
+}
+
 // SetupConnectionParams sets up connection parameters from share
 func (s *ShareService) SetupConnectionParams(ctx *gin.Context, share *model.Share) {
 	// Filter out and add new parameters
@@ -128,7 +144,11 @@ func (s *ShareService) SetupConnectionParams(ctx *gin.Context, share *model.Shar
 
 	// Set share context values
 	ctx.Set("shareId", share.Id)
-	ctx.Set("session", &acl.Session{})
+	ctx.Set("shareCreatorId", share.CreatorId)
+	operator, err := acl.GetSessionFromCtx(ctx)
+	if err != nil || operator == nil || operator.GetUid() <= 0 {
+		ctx.Set("session", &acl.Session{Acl: acl.Acl{UserName: "Anonymous"}})
+	}
 	ctx.Set("shareEnd", share.End)
 }
 

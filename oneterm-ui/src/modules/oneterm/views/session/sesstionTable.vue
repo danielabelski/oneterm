@@ -65,7 +65,9 @@
           :loading="loading"
         >
           <vxe-column type="checkbox" width="60px"></vxe-column>
-          <vxe-column :title="$t(`user`)" field="user_name"> </vxe-column>
+          <vxe-column :title="$t(`user`)" field="user_name">
+            <template #default="{ row }">{{ operatorName(row) }}</template>
+          </vxe-column>
           <vxe-column :title="$t(`oneterm.asset`)" field="asset_info"> </vxe-column>
           <vxe-column :title="$t(`oneterm.gateway`)" field="gateway_info"> </vxe-column>
           <vxe-column :title="$t(`oneterm.account`)" field="account_info"> </vxe-column>
@@ -181,6 +183,9 @@ export default {
     this.updateTableData()
   },
   methods: {
+    operatorName(row) {
+      return row.share_id && !row.uid ? this.$t('oneterm.sessionTable.anonymousUser') : row.user_name || '-'
+    },
     moment,
     updateTableData(currentPage = 1, pageSize = this.tablePage.pageSize) {
       this.loading = true
@@ -260,7 +265,7 @@ export default {
         const dataList = [
           {
             key: this.$t(`user`),
-            value: row?.user_name || ''
+            value: this.operatorName(row)
           },
           {
             key: this.$t(`oneterm.asset`),

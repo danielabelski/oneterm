@@ -222,6 +222,7 @@ func SetupRouter(r *gin.Engine) {
 		}
 
 		r.GET("/api/oneterm/v1/share/connect/:uuid", middleware.Error2RespMiddleware(), c.ConnectShare)
+		r.GET("/api/oneterm/v1/share/info/:uuid", middleware.Error2RespMiddleware(), c.GetShareConnectionInfo)
 
 		authorization := v1.Group("/authorization")
 		{
