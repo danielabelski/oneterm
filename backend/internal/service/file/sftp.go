@@ -300,32 +300,7 @@ func SftpUploadWithExistingClient(client *sftp.Client, transferId, localPath, re
 
 // SftpDownloadMultiple downloads multiple files as ZIP or single file
 func SftpDownloadMultiple(ctx context.Context, assetId, accountId int, dir string, filenames []string) (io.ReadCloser, string, int64, error) {
-	cli, err := GetFileManager().GetFileClient(assetId, accountId)
-	if err != nil {
-		return nil, "", 0, fmt.Errorf("failed to get SFTP client: %w", err)
-	}
-
-	if len(filenames) == 1 {
-		// Single file download
-		fullPath := filepath.Join(dir, filenames[0])
-		file, err := cli.Open(fullPath)
-		if err != nil {
-			return nil, "", 0, fmt.Errorf("failed to open file %s: %w", fullPath, err)
-		}
-
-		// Get file size
-		info, err := cli.Stat(fullPath)
-		if err != nil {
-			file.Close()
-			return nil, "", 0, fmt.Errorf("failed to get file info: %w", err)
-		}
-
-		return file, filenames[0], info.Size(), nil
-	}
-
-	// Multiple files - use the common ZIP creation logic from FileService
-	fileService := &FileService{}
-	return fileService.createZipArchive(cli, dir, filenames)
+	return (&FileService{}).DownloadMultiple(ctx, assetId, accountId, dir, filenames)
 }
 
 // =============================================================================

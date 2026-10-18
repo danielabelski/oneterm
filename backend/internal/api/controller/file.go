@@ -80,10 +80,10 @@ func (c *Controller) FileLS(ctx *gin.Context) {
 	}
 
 	// Check connect permission first
-	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess, model.ActionConnect); err != nil {
+	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess, model.ActionConnect, model.ActionFileUpload, model.ActionFileDownload); err != nil {
 		ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrInvalidArgument, Data: map[string]any{"err": err}})
 		return
-	} else if !result.IsAllowed(model.ActionConnect) {
+	} else if !result.IsAllowed(model.ActionConnect) || (!result.IsAllowed(model.ActionFileUpload) && !result.IsAllowed(model.ActionFileDownload)) {
 		ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{Code: myErrors.ErrNoPerm, Data: map[string]any{}})
 		return
 	}
@@ -112,8 +112,9 @@ func (c *Controller) FileLS(ctx *gin.Context) {
 		List: lo.Map(info, func(f fs.FileInfo, _ int) any {
 			var target string
 			if f.Mode()&os.ModeSymlink != 0 {
-				cli, err := fileservice.GetFileManager().GetFileClient(sess.Session.AssetId, sess.Session.AccountId)
+				cli, release, err := fileservice.GetFileManager().Acquire(ctx.Request.Context(), sess.Session.AssetId, sess.Session.AccountId)
 				if err == nil {
+					defer release()
 					linkPath := filepath.Join(ctx.Query("dir"), f.Name())
 					if linkTarget, err := cli.ReadLink(linkPath); err == nil {
 						target = linkTarget
@@ -151,10 +152,10 @@ func (c *Controller) FileMkdir(ctx *gin.Context) {
 	}
 
 	// Check file upload permission (mkdir is considered an upload operation)
-	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess, model.ActionFileUpload); err != nil {
+	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess, model.ActionConnect, model.ActionFileUpload); err != nil {
 		ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrInvalidArgument, Data: map[string]any{"err": err}})
 		return
-	} else if !result.IsAllowed(model.ActionFileUpload) {
+	} else if !result.IsAllowed(model.ActionConnect) || !result.IsAllowed(model.ActionFileUpload) {
 		ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{Code: myErrors.ErrNoPerm, Data: map[string]any{"message": "No file upload permission"}})
 		return
 	}
@@ -193,10 +194,10 @@ func (c *Controller) FileUpload(ctx *gin.Context) {
 	}
 
 	// Check file upload permission using V2 system
-	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess, model.ActionFileUpload); err != nil {
+	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess, model.ActionConnect, model.ActionFileUpload); err != nil {
 		ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrInvalidArgument, Data: map[string]any{"err": err}})
 		return
-	} else if !result.IsAllowed(model.ActionFileUpload) {
+	} else if !result.IsAllowed(model.ActionConnect) || !result.IsAllowed(model.ActionFileUpload) {
 		ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{Code: myErrors.ErrNoPerm, Data: map[string]any{"message": "No file upload permission"}})
 		return
 	}
@@ -213,7 +214,10 @@ func (c *Controller) FileUpload(ctx *gin.Context) {
 		transferId = fmt.Sprintf("%d-%d-%d", sess.Session.AssetId, sess.Session.AccountId, time.Now().UnixNano())
 	}
 
-	fileservice.CreateTransferProgress(transferId, "sftp")
+	if !registerFileProgress(ctx, transferId, "sftp", fmt.Sprintf("asset:%d:account:%d", sess.AssetId, sess.AccountId), true) {
+		return
+	}
+	defer fileservice.CleanupTransferProgress(transferId, 30*time.Second)
 
 	// Parse multipart form
 	if err := ctx.Request.ParseMultipartForm(MaxMemoryForParsing); err != nil {
@@ -330,11 +334,6 @@ func (c *Controller) FileUpload(ctx *gin.Context) {
 		},
 	})
 
-	// Clean up progress record after a short delay
-	go func() {
-		time.Sleep(30 * time.Second) // Keep for 30 seconds for any delayed queries
-		fileservice.CleanupTransferProgress(transferId, 0)
-	}()
 }
 
 // FileDownload godoc
@@ -355,10 +354,10 @@ func (c *Controller) FileDownload(ctx *gin.Context) {
 	}
 
 	// Check file download permission using V2 system
-	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess, model.ActionFileDownload); err != nil {
+	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, sess, model.ActionConnect, model.ActionFileDownload); err != nil {
 		ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrInvalidArgument, Data: map[string]any{"err": err}})
 		return
-	} else if !result.IsAllowed(model.ActionFileDownload) {
+	} else if !result.IsAllowed(model.ActionConnect) || !result.IsAllowed(model.ActionFileDownload) {
 		ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{Code: myErrors.ErrNoPerm, Data: map[string]any{"message": "No file download permission"}})
 		return
 	}
@@ -509,7 +508,6 @@ func (c *Controller) RDPFileUpload(ctx *gin.Context) {
 	}
 
 	// Create progress record IMMEDIATELY when request starts
-	fileservice.CreateTransferProgress(transferId, "rdp")
 
 	tunnel, authResult, err := c.validateRDPAccess(ctx, sessionId)
 	if err != nil {
@@ -553,6 +551,11 @@ func (c *Controller) RDPFileUpload(ctx *gin.Context) {
 		})
 		return
 	}
+
+	if !registerFileProgress(ctx, transferId, "rdp", sessionId, true) {
+		return
+	}
+	defer fileservice.CleanupTransferProgress(transferId, 30*time.Second)
 
 	// Parse multipart form with streaming
 	contentType := ctx.GetHeader("Content-Type")
@@ -722,11 +725,6 @@ func (c *Controller) RDPFileUpload(ctx *gin.Context) {
 		Data:    responseData,
 	})
 
-	// Clean up progress record after a short delay
-	go func() {
-		time.Sleep(30 * time.Second) // Keep for 30 seconds for any delayed queries
-		fileservice.CleanupTransferProgress(transferId, 0)
-	}()
 }
 
 // RDPFileDownload downloads files from RDP session drive
@@ -969,7 +967,7 @@ func (c *Controller) validateRDPAccess(ctx *gin.Context, sessionId string) (*gua
 	}
 
 	onlineSession := gsession.GetOnlineSessionById(sessionId)
-	if onlineSession == nil {
+	if onlineSession == nil || !canAccessFileSession(ctx, onlineSession) {
 		return nil, nil, fmt.Errorf("session not found or not active")
 	}
 
@@ -1026,7 +1024,7 @@ func (c *Controller) SftpFileLS(ctx *gin.Context) {
 
 	// Get session info for authorization check
 	onlineSession := gsession.GetOnlineSessionById(sessionId)
-	if onlineSession == nil {
+	if onlineSession == nil || !canAccessFileSession(ctx, onlineSession) {
 		ctx.JSON(http.StatusNotFound, HttpResponse{
 			Code:    http.StatusNotFound,
 			Message: "Session not found",
@@ -1115,7 +1113,7 @@ func (c *Controller) SftpFileMkdir(ctx *gin.Context) {
 
 	// Get session info for authorization check
 	onlineSession := gsession.GetOnlineSessionById(sessionId)
-	if onlineSession == nil {
+	if onlineSession == nil || !canAccessFileSession(ctx, onlineSession) {
 		ctx.JSON(http.StatusNotFound, HttpResponse{
 			Code:    http.StatusNotFound,
 			Message: "Session not found",
@@ -1124,10 +1122,10 @@ func (c *Controller) SftpFileMkdir(ctx *gin.Context) {
 	}
 
 	// Check file upload permission for SFTP mkdir
-	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, onlineSession, model.ActionFileUpload); err != nil {
+	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, onlineSession, model.ActionConnect, model.ActionFileUpload); err != nil {
 		ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrInvalidArgument, Data: map[string]any{"err": err}})
 		return
-	} else if !result.IsAllowed(model.ActionFileUpload) {
+	} else if !result.IsAllowed(model.ActionConnect) || !result.IsAllowed(model.ActionFileUpload) {
 		ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{Code: myErrors.ErrNoPerm, Data: map[string]any{"message": "No file upload permission"}})
 		return
 	}
@@ -1160,12 +1158,24 @@ func (c *Controller) SftpFileMkdir(ctx *gin.Context) {
 // @Tags file
 // @Router /file/transfer/progress/id/:transfer_id [get]
 func (c *Controller) TransferProgressById(ctx *gin.Context) {
+	ctx.Header("Cache-Control", "no-store")
+	operator, err := acl.GetSessionFromCtx(ctx)
+	if err != nil || operator == nil || operator.Uid <= 0 {
+		ctx.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
 	transferId := ctx.Param("transfer_id")
 
 	// First check unified progress tracking
 	progress, exists := fileservice.GetTransferProgressById(transferId)
 
 	if exists {
+		if progress.OwnerUID <= 0 || (progress.OwnerUID != operator.Uid && !acl.IsAdmin(operator)) {
+			ctx.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+
 		// Calculate transfer progress
 		var progressPercent int
 		if progress.TotalSize > 0 {
@@ -1187,7 +1197,7 @@ func (c *Controller) TransferProgressById(ctx *gin.Context) {
 
 	// Fallback: check RDP guacd transfer manager
 	rdpProgress, err := fileservice.GetRDPTransferProgressById(transferId)
-	if err == nil {
+	if err == nil && canAccessFileSession(ctx, gsession.GetOnlineSessionById(rdpProgress.SessionID)) {
 		ctx.JSON(http.StatusOK, HttpResponse{
 			Code:    0,
 			Message: "ok",
@@ -1231,7 +1241,19 @@ func (c *Controller) RDPFileTransferPrepare(ctx *gin.Context) {
 	}
 
 	// Create unified progress tracking entry
-	fileservice.CreateTransferProgress(transferId, "rdp")
+
+	tunnel, result, err := c.validateRDPAccess(ctx, sessionId)
+	if err != nil {
+		ctx.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	if !result.IsAllowed(model.ActionFileUpload) || !fileservice.IsRDPDriveEnabled(tunnel) || !fileservice.IsRDPUploadAllowed(tunnel) {
+		ctx.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if !registerFileProgress(ctx, transferId, "rdp", sessionId, false) {
+		return
+	}
 
 	ctx.JSON(http.StatusOK, HttpResponse{
 		Code:    0,
@@ -1269,8 +1291,6 @@ func (c *Controller) SftpFileUpload(ctx *gin.Context) {
 		transferId = fmt.Sprintf("%s-%d", sessionId, time.Now().UnixNano())
 	}
 
-	fileservice.CreateTransferProgress(transferId, "sftp")
-
 	// Validate session
 	if !fileservice.DefaultFileService.IsSessionActive(sessionId) {
 		ctx.JSON(http.StatusNotFound, HttpResponse{
@@ -1281,7 +1301,7 @@ func (c *Controller) SftpFileUpload(ctx *gin.Context) {
 	}
 
 	onlineSession := gsession.GetOnlineSessionById(sessionId)
-	if onlineSession == nil {
+	if onlineSession == nil || !canAccessFileSession(ctx, onlineSession) {
 		ctx.JSON(http.StatusNotFound, HttpResponse{
 			Code:    http.StatusNotFound,
 			Message: "Session not found",
@@ -1290,13 +1310,18 @@ func (c *Controller) SftpFileUpload(ctx *gin.Context) {
 	}
 
 	// Check file upload permission for SFTP upload
-	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, onlineSession, model.ActionFileUpload); err != nil {
+	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, onlineSession, model.ActionConnect, model.ActionFileUpload); err != nil {
 		ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrInvalidArgument, Data: map[string]any{"err": err}})
 		return
-	} else if !result.IsAllowed(model.ActionFileUpload) {
+	} else if !result.IsAllowed(model.ActionConnect) || !result.IsAllowed(model.ActionFileUpload) {
 		ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{Code: myErrors.ErrNoPerm, Data: map[string]any{"message": "No file upload permission"}})
 		return
 	}
+
+	if !registerFileProgress(ctx, transferId, "sftp", sessionId, true) {
+		return
+	}
+	defer fileservice.CleanupTransferProgress(transferId, 30*time.Second)
 
 	// Use streaming multipart parsing like RDP to minimize memory usage
 	contentType := ctx.GetHeader("Content-Type")
@@ -1458,11 +1483,6 @@ func (c *Controller) SftpFileUpload(ctx *gin.Context) {
 		},
 	})
 
-	// Clean up progress record after a short delay
-	go func() {
-		time.Sleep(30 * time.Second) // Keep for 30 seconds for any delayed queries
-		fileservice.CleanupTransferProgress(transferId, 0)
-	}()
 }
 
 // SftpFileDownload godoc
@@ -1487,7 +1507,7 @@ func (c *Controller) SftpFileDownload(ctx *gin.Context) {
 
 	// Get session info for authorization check
 	onlineSession := gsession.GetOnlineSessionById(sessionId)
-	if onlineSession == nil {
+	if onlineSession == nil || !canAccessFileSession(ctx, onlineSession) {
 		ctx.JSON(http.StatusNotFound, HttpResponse{
 			Code:    http.StatusNotFound,
 			Message: "Session not found",
@@ -1496,10 +1516,10 @@ func (c *Controller) SftpFileDownload(ctx *gin.Context) {
 	}
 
 	// Check file download permission for SFTP download
-	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, onlineSession, model.ActionFileDownload); err != nil {
+	if result, err := service.DefaultAuthService.HasAuthorizationV2(ctx, onlineSession, model.ActionConnect, model.ActionFileDownload); err != nil {
 		ctx.AbortWithError(http.StatusBadRequest, &myErrors.ApiError{Code: myErrors.ErrInvalidArgument, Data: map[string]any{"err": err}})
 		return
-	} else if !result.IsAllowed(model.ActionFileDownload) {
+	} else if !result.IsAllowed(model.ActionConnect) || !result.IsAllowed(model.ActionFileDownload) {
 		ctx.AbortWithError(http.StatusForbidden, &myErrors.ApiError{Code: myErrors.ErrNoPerm, Data: map[string]any{"message": "No file download permission"}})
 		return
 	}

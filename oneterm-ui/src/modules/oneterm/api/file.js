@@ -28,6 +28,8 @@ export function getFileTransferProgressById(transferId, params) {
   return axios({
     url: `/oneterm/v1/file/transfer/progress/id/${transferId}`,
     method: 'get',
-    params
+    params,
+    timeout: 5000,
+    isShowMessage: false
   })
 }

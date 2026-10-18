@@ -115,6 +115,7 @@ export default {
   },
   data() {
     return {
+      alive: true,
       visible: false,
       uploadType: 'file',
       uploadTypeOptions: [
@@ -129,6 +130,13 @@ export default {
         ERROR: 'error'
       }
     }
+  },
+  beforeDestroy() {
+    this.alive = false
+    this.fileList.forEach(file => {
+      clearTimeout(file.progressInterval)
+      if (file.xhr) { file.xhr.onreadystatechange = null; file.xhr.abort() }
+    })
   },
   watch: {
     fileList: {
@@ -198,6 +206,7 @@ export default {
       file.xhr = xhr
 
       xhr.upload.addEventListener('progress', (e) => {
+        if (!this.alive || ![this.UPLOAD_STATUS.UPLOADING, this.UPLOAD_STATUS.TRANSMITTING].includes(file.status)) return
         if (!e.lengthComputable) {
           return
         }
@@ -205,37 +214,22 @@ export default {
         if (e.loaded === e.total) {
           file.status = this.UPLOAD_STATUS.TRANSMITTING
           file.uploadProgress = 100
-          file.progressInterval = setInterval(async () => {
-            const res = await getFileTransferProgressById(
-              file.id,
-              {
-                type: this.connectType === 'ssh' ? 'sftp' : 'rdp'
-              }
-            )
-
-            if (file.status !== this.UPLOAD_STATUS.TRANSMITTING) {
-              clearInterval(file.progressInterval)
-              return
-            }
-
-            const progress = Math.round(res?.data?.progress || 0)
-            if (progress === 100) {
-              clearInterval(file.progressInterval)
-            }
-            file.transmissionProgress = progress
-          }, 1000)
+          if (!file.progressStarted) {
+            file.progressStarted = true
+            file.progressInterval = setTimeout(() => this.pollProgress(file), 1000)
+          }
         } else {
           file.uploadProgress = Math.round((e.loaded / e.total) * 100)
         }
       })
 
       xhr.onreadystatechange = (data) => {
-        if (xhr.readyState !== 4) {
+        if (!this.alive || xhr.readyState !== 4) {
           return
         }
 
         if (file.progressInterval) {
-          clearInterval(file.progressInterval)
+          clearTimeout(file.progressInterval)
         }
 
         if (xhr.status >= 200 && xhr.status < 300) {
@@ -243,25 +237,25 @@ export default {
           file.transmissionProgress = 100
           file.status = this.UPLOAD_STATUS.SUCCESS
           this.$emit('uploadSuccess', file)
-        } else if (xhr.status >= 400) {
+        } else if (xhr.status >= 400 || xhr.status === 0) {
           file.status = this.UPLOAD_STATUS.ERROR
 
           let errorMessage = this.$t('oneterm.fileManagement.uploadFailed')
-          if (xhr.responseText) {
-            const responseText = JSON.parse(xhr.responseText)
-            if (responseText?.message) {
-              errorMessage = responseText.message
-            }
+          try {
+            const responseText = JSON.parse(xhr.responseText || '{}')
+            if (responseText?.message) errorMessage = responseText.message
+          } catch (error) {
+            // A proxy can return a non-JSON response.
           }
           this.$message.error(errorMessage)
         }
       }
 
       const baseUrl = '/api'
-      let postURL = `${baseUrl}/oneterm/v1/file/session/${this.sessionId}/upload?dir=${file.path}&transfer_id=${file.id}`
+      let postURL = `${baseUrl}/oneterm/v1/file/session/${encodeURIComponent(this.sessionId)}/upload?dir=${encodeURIComponent(file.path)}&transfer_id=${encodeURIComponent(file.id)}`
 
       if (this.connectType === 'rdp') {
-        postURL = `${baseUrl}/oneterm/v1/rdp/sessions/${this.sessionId}/files/upload?path=${file.path}&transfer_id=${file.id}`
+        postURL = `${baseUrl}/oneterm/v1/rdp/sessions/${encodeURIComponent(this.sessionId)}/files/upload?path=${encodeURIComponent(file.path)}&transfer_id=${encodeURIComponent(file.id)}`
       }
 
       const formData = new FormData()
@@ -269,6 +263,19 @@ export default {
 
       xhr.open('POST', postURL)
       xhr.send(formData)
+    },
+
+    async pollProgress(file) {
+      if (!this.alive || file.status !== this.UPLOAD_STATUS.TRANSMITTING) return
+      try {
+        const response = await getFileTransferProgressById(file.id, { type: this.connectType === 'ssh' ? 'sftp' : 'rdp' })
+        if (!this.alive || file.status !== this.UPLOAD_STATUS.TRANSMITTING) return
+        file.transmissionProgress = Math.max(0, Math.min(100, Math.round(response?.data?.progress || 0)))
+        if (file.transmissionProgress === 100) return
+      } catch (error) {
+        // The upload response determines success; progress can be temporarily unavailable.
+      }
+      if (this.alive && file.status === this.UPLOAD_STATUS.TRANSMITTING) file.progressInterval = setTimeout(() => this.pollProgress(file), 1000)
     },
 
     getProgressStatus(status) {

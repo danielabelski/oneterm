@@ -32,11 +32,7 @@ import (
 
 var (
 	// Legacy asset-based file manager
-	fm = &FileManager{
-		sftps:    map[string]*sftp.Client{},
-		lastTime: map[string]time.Time{},
-		mtx:      sync.Mutex{},
-	}
+	fm = &FileManager{entries: map[string]*fileClientEntry{}}
 
 	// New session-based file manager
 	sessionFM = &SessionFileManager{
@@ -89,56 +85,133 @@ type FileInfo struct {
 
 // FileManager manages SFTP connections (legacy asset-based)
 type FileManager struct {
-	sftps    map[string]*sftp.Client
-	lastTime map[string]time.Time
-	mtx      sync.Mutex
+	entries map[string]*fileClientEntry
+	mtx     sync.Mutex
+	inits   singleflight.Group
 }
 
-func (fm *FileManager) GetFileClient(assetId, accountId int) (cli *sftp.Client, err error) {
-	fm.mtx.Lock()
-	defer fm.mtx.Unlock()
+type fileClientEntry struct {
+	tunnelID string
+	client   *sftp.Client
+	owner    *ssh.Client
+	active   int
+	lastUsed time.Time
+}
 
+func (fm *FileManager) Acquire(ctx context.Context, assetId, accountId int) (*sftp.Client, func(), error) {
 	key := fmt.Sprintf("%d-%d", assetId, accountId)
-	defer func() {
-		fm.lastTime[key] = time.Now()
-	}()
-
-	cli, ok := fm.sftps[key]
-	if ok {
-		return
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		fm.mtx.Lock()
+		entry := fm.entries[key]
+		if entry != nil {
+			entry.active++
+			fm.mtx.Unlock()
+			var once sync.Once
+			release := func() {
+				once.Do(func() { fm.mtx.Lock(); entry.active--; entry.lastUsed = time.Now(); fm.mtx.Unlock() })
+			}
+			return entry.client, release, nil
+		}
+		fm.mtx.Unlock()
+		result := fm.inits.DoChan(key, func() (any, error) {
+			fm.mtx.Lock()
+			existing := fm.entries[key]
+			fm.mtx.Unlock()
+			if existing != nil {
+				return existing, nil
+			}
+			bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			entry, err := dialFileClient(bounded, assetId, accountId)
+			if err != nil {
+				return nil, err
+			}
+			fm.mtx.Lock()
+			var oldestKey string
+			var oldest *fileClientEntry
+			if len(fm.entries) >= 256 {
+				for candidate, current := range fm.entries {
+					if current.active == 0 && (oldest == nil || current.lastUsed.Before(oldest.lastUsed)) {
+						oldestKey, oldest = candidate, current
+					}
+				}
+				if oldest == nil {
+					fm.mtx.Unlock()
+					entry.close()
+					return nil, errors.New("SFTP connection capacity reached")
+				}
+				delete(fm.entries, oldestKey)
+			}
+			fm.entries[key] = entry
+			fm.mtx.Unlock()
+			if oldest != nil {
+				oldest.close()
+			}
+			return entry, nil
+		})
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case result := <-result:
+			if result.Err != nil {
+				return nil, nil, result.Err
+			}
+		}
 	}
+}
 
+var legacySFTPInitializations = make(chan struct{}, 16)
+
+func dialFileClient(ctx context.Context, assetId, accountId int) (*fileClientEntry, error) {
+	select {
+	case legacySFTPInitializations <- struct{}{}:
+		defer func() { <-legacySFTPInitializations }()
+	default:
+		return nil, errors.New("SFTP connection capacity reached")
+	}
 	asset, account, gateway, err := repository.GetAAG(assetId, accountId)
 	if err != nil {
-		return
+		return nil, err
 	}
 
-	ip, port, err := tunneling.Proxy(false, uuid.New().String(), "sftp,ssh", asset, gateway)
+	tunnelID := uuid.NewString()
+	retained := false
+	defer func() {
+		if !retained {
+			tunneling.CloseTunnels(tunnelID)
+		}
+	}()
+	ip, port, err := tunneling.Proxy(false, tunnelID, "sftp,ssh", asset, gateway)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	auth, err := repository.GetAuth(account)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	targetHost, targetPort, err := tunneling.Target("sftp,ssh", asset)
 	if err != nil {
 		return nil, err
 	}
-	sshCli, err := sshclient.Dial(context.Background(), net.JoinHostPort(ip, strconv.Itoa(port)), &ssh.ClientConfig{
+	sshCli, err := sshclient.Dial(ctx, net.JoinHostPort(ip, strconv.Itoa(port)), &ssh.ClientConfig{
 		User:            account.Account,
 		Auth:            []ssh.AuthMethod{auth},
 		HostKeyCallback: sshclient.HostKey(net.JoinHostPort(targetHost, strconv.Itoa(targetPort))),
 		Timeout:         time.Second,
 	})
 	if err != nil {
-		return
+		return nil, err
 	}
 
+	stop := context.AfterFunc(ctx, func() { sshCli.Close() })
+	defer stop()
 	// Create optimized SFTP client
-	cli, err = sftp.NewClient(sshCli,
+	cli, err := sftp.NewClient(sshCli,
 		sftp.MaxPacket(32768),                 // 32KB packets for maximum compatibility
 		sftp.MaxConcurrentRequestsPerFile(16), // Increase concurrent requests
 		sftp.UseConcurrentWrites(true),        // Enable concurrent writes
@@ -147,11 +220,33 @@ func (fm *FileManager) GetFileClient(assetId, accountId int) (cli *sftp.Client, 
 	)
 	if err != nil {
 		sshCli.Close()
-		return
+		return nil, err
 	}
-	fm.sftps[key] = cli
+	retained = true
+	return &fileClientEntry{client: cli, owner: sshCli, tunnelID: tunnelID, lastUsed: time.Now()}, nil
+}
 
-	return
+func (entry *fileClientEntry) close() {
+	entry.client.Close()
+	entry.owner.Close()
+	if entry.tunnelID != "" {
+		tunneling.CloseTunnels(entry.tunnelID)
+	}
+}
+
+func (fm *FileManager) CleanupIdle(now time.Time, idle time.Duration) {
+	var expired []*fileClientEntry
+	fm.mtx.Lock()
+	for key, entry := range fm.entries {
+		if entry.active == 0 && now.Sub(entry.lastUsed) >= idle {
+			delete(fm.entries, key)
+			expired = append(expired, entry)
+		}
+	}
+	fm.mtx.Unlock()
+	for _, entry := range expired {
+		entry.close()
+	}
 }
 
 // SessionFileManager manages SFTP connections per session
@@ -499,6 +594,10 @@ func (m *SessionFileTransferManager) CleanupCompletedTransfers(maxAge time.Durat
 
 // Progress tracking structures
 type FileTransferProgress struct {
+	OwnerUID        int
+	Scope           string
+	active          bool
+	expiresAt       time.Time
 	TotalSize       int64
 	TransferredSize int64
 	Status          string // "transferring", "completed", "failed"
@@ -640,15 +739,54 @@ func (t *SessionFileTransfer) GetProgress() *SessionFileTransferProgress {
 }
 
 // Progress tracking functions
-func CreateTransferProgress(transferId, transferType string) {
-	transferMutex.Lock()
-	fileTransfers[transferId] = &FileTransferProgress{
-		TotalSize:       0,
-		TransferredSize: 0,
-		Status:          "transferring",
-		Type:            transferType,
+var (
+	ErrTransferProgressInput    = errors.New("invalid transfer progress request")
+	ErrTransferProgressConflict = errors.New("transfer progress is unavailable")
+	ErrTransferProgressCapacity = errors.New("transfer progress capacity reached")
+)
+
+func CreateTransferProgress(transferId, transferType string, uid int, scope string, active bool) error {
+	if uid <= 0 || transferId == "" || len(transferId) > 128 || scope == "" || (transferType != "sftp" && transferType != "rdp") {
+		return ErrTransferProgressInput
 	}
-	transferMutex.Unlock()
+	transferMutex.Lock()
+	defer transferMutex.Unlock()
+	now := time.Now()
+	if previous := fileTransfers[transferId]; previous != nil {
+		if !previous.active && !now.Before(previous.expiresAt) {
+			delete(fileTransfers, transferId)
+		} else {
+			if previous.OwnerUID != uid || previous.Scope != scope || previous.Type != transferType {
+				return ErrTransferProgressConflict
+			}
+			if !active {
+				return nil
+			}
+			if previous.active || previous.Status == "completed" {
+				return ErrTransferProgressConflict
+			}
+			previous.active = true
+			previous.Status = "transferring"
+			previous.TotalSize = 0
+			previous.TransferredSize = 0
+			previous.expiresAt = time.Time{}
+			return nil
+		}
+	}
+	if len(fileTransfers) >= 8192 {
+		cleanupExpiredTransfersLocked(now)
+	}
+	if len(fileTransfers) >= 8192 {
+		return ErrTransferProgressCapacity
+	}
+	status := "prepared"
+	expires := now.Add(2 * time.Minute)
+	if active {
+		status = "transferring"
+		expires = time.Time{}
+	}
+	fileTransfers[transferId] = &FileTransferProgress{OwnerUID: uid, Scope: scope, Status: status, Type: transferType, active: active, expiresAt: expires}
+	return nil
 }
 
 func UpdateTransferProgress(transferId string, totalSize, transferredSize int64, status string) {
@@ -668,19 +806,44 @@ func UpdateTransferProgress(transferId string, totalSize, transferredSize int64,
 }
 
 func CleanupTransferProgress(transferId string, delay time.Duration) {
-	go func() {
-		time.Sleep(delay)
-		transferMutex.Lock()
+	transferMutex.Lock()
+	defer transferMutex.Unlock()
+	if delay <= 0 {
 		delete(fileTransfers, transferId)
-		transferMutex.Unlock()
-	}()
+		return
+	}
+	if progress := fileTransfers[transferId]; progress != nil {
+		progress.active = false
+		progress.expiresAt = time.Now().Add(delay)
+		if progress.Status == "transferring" {
+			progress.Status = "failed"
+		}
+	}
+}
+
+func CleanupExpiredTransfers(now time.Time) {
+	transferMutex.Lock()
+	defer transferMutex.Unlock()
+	cleanupExpiredTransfersLocked(now)
+}
+
+func cleanupExpiredTransfersLocked(now time.Time) {
+	for id, progress := range fileTransfers {
+		if !progress.active && !now.Before(progress.expiresAt) {
+			delete(fileTransfers, id)
+		}
+	}
 }
 
 func GetTransferProgressById(transferId string) (*FileTransferProgress, bool) {
 	transferMutex.RLock()
+	defer transferMutex.RUnlock()
 	progress, exists := fileTransfers[transferId]
-	transferMutex.RUnlock()
-	return progress, exists
+	if !exists || (!progress.active && !time.Now().Before(progress.expiresAt)) {
+		return nil, false
+	}
+	snapshot := *progress
+	return &snapshot, true
 }
 
 // Utility functions

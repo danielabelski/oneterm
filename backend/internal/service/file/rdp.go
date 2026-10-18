@@ -440,7 +440,7 @@ func UploadRDPFileStreamWithID(tunnel *guacd.Tunnel, transferID, sessionId, path
 }
 
 // GetRDPTransferProgressById gets RDP transfer progress by ID
-func GetRDPTransferProgressById(transferId string) (interface{}, error) {
+func GetRDPTransferProgressById(transferId string) (*guacd.FileTransferProgress, error) {
 	progress, err := guacd.DefaultFileTransferManager.GetTransferProgress(transferId)
 	if err != nil {
 		return nil, err

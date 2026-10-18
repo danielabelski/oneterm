@@ -41,16 +41,8 @@ func init() {
 		tk := time.NewTicker(time.Minute)
 		for {
 			<-tk.C
-			func() {
-				GetFileManager().mtx.Lock()
-				defer GetFileManager().mtx.Unlock()
-				for k, v := range GetFileManager().lastTime {
-					if v.Before(time.Now().Add(time.Minute * 10)) {
-						delete(GetFileManager().sftps, k)
-						delete(GetFileManager().lastTime, k)
-					}
-				}
-			}()
+			GetFileManager().CleanupIdle(time.Now(), 10*time.Minute)
+			CleanupExpiredTransfers(time.Now())
 		}
 	}()
 
@@ -76,26 +68,35 @@ func NewFileService(repo repository.IFileRepository) IFileService {
 
 // Legacy asset-based operations
 func (s *FileService) ReadDir(ctx context.Context, assetId, accountId int, dir string) ([]fs.FileInfo, error) {
-	cli, err := GetFileManager().GetFileClient(assetId, accountId)
+	cli, release, err := GetFileManager().Acquire(ctx, assetId, accountId)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	return cli.ReadDir(dir)
 }
 
 func (s *FileService) MkdirAll(ctx context.Context, assetId, accountId int, dir string) error {
-	cli, err := GetFileManager().GetFileClient(assetId, accountId)
+	cli, release, err := GetFileManager().Acquire(ctx, assetId, accountId)
 	if err != nil {
 		return err
 	}
+	defer release()
 	return cli.MkdirAll(dir)
 }
 
 func (s *FileService) Create(ctx context.Context, assetId, accountId int, path string) (io.WriteCloser, error) {
-	cli, err := GetFileManager().GetFileClient(assetId, accountId)
+	cli, release, err := GetFileManager().Acquire(ctx, assetId, accountId)
 	if err != nil {
 		return nil, err
 	}
+
+	leased := false
+	defer func() {
+		if !leased {
+			release()
+		}
+	}()
 
 	// Check if parent directory exists, create only if not exists
 	parentDir := filepath.Dir(path)
@@ -108,31 +109,56 @@ func (s *FileService) Create(ctx context.Context, assetId, accountId int, path s
 		}
 	}
 
-	return cli.Create(path)
+	file, err := cli.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	leased = true
+	return &leasedFile{File: file, release: release}, nil
 }
 
 func (s *FileService) Open(ctx context.Context, assetId, accountId int, path string) (io.ReadCloser, error) {
-	cli, err := GetFileManager().GetFileClient(assetId, accountId)
+	cli, release, err := GetFileManager().Acquire(ctx, assetId, accountId)
 	if err != nil {
 		return nil, err
 	}
-	return cli.Open(path)
+
+	leased := false
+	defer func() {
+		if !leased {
+			release()
+		}
+	}()
+	file, err := cli.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	leased = true
+	return &leasedFile{File: file, release: release}, nil
 }
 
 func (s *FileService) Stat(ctx context.Context, assetId, accountId int, path string) (fs.FileInfo, error) {
-	cli, err := GetFileManager().GetFileClient(assetId, accountId)
+	cli, release, err := GetFileManager().Acquire(ctx, assetId, accountId)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	return cli.Stat(path)
 }
 
 // DownloadMultiple handles downloading single file or multiple files/directories as ZIP
 func (s *FileService) DownloadMultiple(ctx context.Context, assetId, accountId int, dir string, filenames []string) (io.ReadCloser, string, int64, error) {
-	cli, err := GetFileManager().GetFileClient(assetId, accountId)
+	cli, release, err := GetFileManager().Acquire(ctx, assetId, accountId)
 	if err != nil {
 		return nil, "", 0, err
 	}
+
+	leased := false
+	defer func() {
+		if !leased {
+			release()
+		}
+	}()
 
 	// Validate and sanitize all filenames for security
 	var sanitizedFilenames []string
@@ -158,16 +184,18 @@ func (s *FileService) DownloadMultiple(ctx context.Context, assetId, accountId i
 			if err != nil {
 				return nil, "", 0, err
 			}
-			return reader, sanitizedFilenames[0], fileInfo.Size(), nil
+			leased = true
+			return &leasedFile{File: reader, release: release}, sanitizedFilenames[0], fileInfo.Size(), nil
 		}
 	}
 
 	// Multiple files or contains directory, create ZIP
-	return s.createZipArchive(cli, dir, sanitizedFilenames)
+	leased = true
+	return s.createZipArchive(cli, dir, sanitizedFilenames, release)
 }
 
 // createZipArchive creates a ZIP archive containing the specified files/directories
-func (s *FileService) createZipArchive(cli *sftp.Client, baseDir string, filenames []string) (io.ReadCloser, string, int64, error) {
+func (s *FileService) createZipArchive(cli *sftp.Client, baseDir string, filenames []string, release ...func()) (io.ReadCloser, string, int64, error) {
 	// Generate ZIP filename
 	var zipName string
 	if len(filenames) == 1 {
@@ -181,6 +209,9 @@ func (s *FileService) createZipArchive(cli *sftp.Client, baseDir string, filenam
 
 	// Create ZIP in a separate goroutine
 	go func() {
+		if len(release) > 0 {
+			defer release[0]()
+		}
 		defer pipeWriter.Close()
 
 		zipWriter := zip.NewWriter(pipeWriter)
